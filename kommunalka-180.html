@@ -115,8 +115,31 @@
 
         // Глобальные переменные Canvas среды для Firebase
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        let firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        // ----------------------------------------------------------------------
+        // !!! СЕКЦИЯ КОНФИГУРАЦИИ FIREBASE ДЛЯ GITHUB PAGES !!!
+        // Если вы видите ошибку "Ошибка инициализации базы данных", значит, вы
+        // запускаете код вне Canvas. Вставьте здесь ваш JSON-объект конфигурации
+        // Firebase (из настроек вашего проекта) для статического хостинга.
+        // Оставьте пустым, если запускаете в среде Canvas.
+        // ----------------------------------------------------------------------
+        const FIREBASE_CONFIG_MANUAL = {
+            // apiKey: "YOUR_API_KEY",
+            // authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+            // projectId: "YOUR_PROJECT_ID",
+            // storageBucket: "YOUR_PROJECT_ID.appspot.com",
+            // messagingSenderId: "...",
+            // appId: "..."
+        };
+        // ----------------------------------------------------------------------
+
+        // Если глобальная переменная Canvas не определена (запуск на GitHub Pages)
+        // и MANUAL_FIREBASE_CONFIG заполнен, используем его.
+        if (Object.keys(firebaseConfig).length === 0 && Object.keys(FIREBASE_CONFIG_MANUAL).length > 0 && FIREBASE_CONFIG_MANUAL.apiKey) {
+             firebaseConfig = FIREBASE_CONFIG_MANUAL;
+        }
 
         let db;
         let auth;
@@ -193,6 +216,12 @@
 
         function initializeFirebase() {
             try {
+                // ПРОВЕРКА: Если конфигурация пуста (потому что не в Canvas и не вставили вручную)
+                 if (!firebaseConfig || !firebaseConfig.apiKey) {
+                     // Бросаем ошибку, чтобы перейти в блок catch с подробным сообщением
+                     throw new Error("Missing Firebase API Key. Please insert your Firebase config manually in the script.");
+                 }
+
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
@@ -226,7 +255,19 @@
 
             } catch (error) {
                 console.error("Failed to initialize Firebase:", error);
-                document.getElementById('global-loading').innerHTML = '<p class="text-red-600">Ошибка инициализации базы данных. Проверьте конфигурацию.</p>';
+                
+                // Выводим информативное сообщение для пользователя
+                document.getElementById('global-loading').innerHTML = 
+                    `<div class="max-w-md mx-auto p-4 bg-red-100 border border-red-400 text-red-700 rounded-xl shadow-lg mt-10">
+                        <p class="font-bold text-lg mb-2">⚠ Ошибка инициализации базы данных</p>
+                        <p class="text-sm">
+                            Вероятно, вы запускаете код на GitHub Pages или локально. 
+                            Для корректной работы с Firestore необходимо вставить ваш JSON-объект 
+                            конфигурации Firebase (apiKey, projectId и т.д.) 
+                            в переменную <code class="bg-red-200 p-[2px] rounded font-mono">FIREBASE_CONFIG_MANUAL</code> 
+                            внутри тега <code class="bg-red-200 p-[2px] rounded font-mono">&lt;script&gt;</code>.
+                        </p>
+                    </div>`;
             }
         }
 
