@@ -208,11 +208,16 @@
             Object.keys(allData).forEach(service => {
                 const readings = allData[service] || []; // Безопасное получение массива
                 readings.forEach(item => {
-                    if (item.createdAt) {
-                        years.add(item.createdAt.toDate().getFullYear());
+                    // --- ИЗМЕНЕНО: Получаем года из расчетного периода, а не из даты создания ---
+                    if (item.billingYear) {
+                        years.add(item.billingYear);
                     }
                 });
             });
+            // Если данных с новыми полями нет, добавим текущий год
+            if (years.size === 0) {
+                years.add(new Date().getFullYear());
+            }
             return Array.from(years).sort((a, b) => b - a);
         }
 
@@ -317,6 +322,10 @@
                     reading: parseFloat(readingData.reading || 0), 
                     cost: parseFloat(readingData.cost),
                     notes: readingData.notes || '',
+                    // --- НОВЫЕ ПОЛЯ ---
+                    billingMonth: parseInt(readingData.billingMonth), // Месяц (0-11)
+                    billingYear: parseInt(readingData.billingYear),   // Год (напр. 2025)
+                    // ---
                     createdAt: serverTimestamp() 
                 };
 
@@ -655,11 +664,17 @@
                      readingPrecision = 2; 
                      consumptionPrecision = 2;
                 }
-
+                
+                // --- НОВОЕ: Форматируем расчетный период ---
+                const period = (typeof r.billingMonth === 'number' && r.billingYear) 
+                                ? `${getMonthName(r.billingMonth)} ${r.billingYear}` 
+                                : 'N/A';
+                // ---
 
                 return `
                     <tr class="border-b hover:bg-gray-50 transition duration-100">
                         <td class="px-2 py-3 sm:p-3 text-sm font-medium text-gray-900">${r.createdAt ? formatDate(r.createdAt) : 'N/A'}</td>
+                        <td class="px-2 py-3 sm:p-3 text-sm font-medium text-gray-700">${period}</td> <!-- НОВАЯ КОЛОНКА -->
                         ${metered ? `<td class="px-2 py-3 sm:p-3 text-sm">${typeof r.reading === 'number' ? r.reading.toFixed(readingPrecision) : 'N/A'}</td>` : ''}
                         ${metered ? `<td class="px-2 py-3 sm:p-3 text-sm text-blue-600">${consumption !== null ? consumption.toFixed(consumptionPrecision) : '-'}</td>` : ''}
                         <td class="px-2 py-3 sm:p-3 text-sm font-semibold">${formatCurrency(r.cost)}</td>
@@ -676,6 +691,7 @@
                             <thead class="bg-gray-50">
                                 <tr>
                                     <th class="px-2 py-3 sm:p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Дата</th>
+                                    <th class="px-2 py-3 sm:p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Период</th> <!-- НОВЫЙ ЗАГОЛОВОК -->
                                     ${metered ? `<th class="px-2 py-3 sm:p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Показание</th>` : ''}
                                     ${metered ? `<th class="px-2 py-3 sm:p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Расход</th>` : ''}
                                     <th class="px-2 py-3 sm:p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Стоимость</th>
@@ -683,7 +699,7 @@
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
-                                ${tableRows.length > 0 ? tableRows : `<tr><td colspan="${metered ? 5 : 3}" class="text-center p-4 text-gray-500">Нет данных. Добавьте первую запись!</td></tr>`}
+                                ${tableRows.length > 0 ? tableRows : `<tr><td colspan="${metered ? 6 : 4}" class="text-center p-4 text-gray-500">Нет данных. Добавьте первую запись!</td></tr>`}
                             </tbody>
                         </table>
                     </div>
@@ -698,6 +714,19 @@
             const displayName = getServiceDisplayName(service);
             let placeholderReading = 'Например, 123.45';
              let stepValue = "0.01"; // Шаг по умолчанию
+            
+            // --- НОВОЕ: Генерируем опции для месяца и года ---
+            const currentMonth = new Date().getMonth();
+            const currentYear = new Date().getFullYear();
+            
+            const monthOptions = Array.from({ length: 12 }, (_, i) => 
+                `<option value="${i}" ${i === currentMonth ? 'selected' : ''}>${getMonthName(i)}</option>`
+            ).join('');
+            
+            const yearOptions = [currentYear, currentYear - 1, currentYear - 2].map(y => 
+                `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y}</option>`
+            ).join('');
+            // ---
             
             if (service === 'Water') {
                  placeholderReading = 'Общий м³';
@@ -714,6 +743,23 @@
             return `
                 <form id="${service}-form" class="bg-white p-4 sm:p-6 rounded-xl shadow-lg border-t-4 border-blue-500">
                     <h3 class="text-xl font-semibold mb-4 text-gray-800">Добавить новые данные (Факт)</h3>
+
+                    <!-- НОВЫЕ ПОЛЯ ВЫБОРА ПЕРИОДА -->
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label for="${service}-month" class="block text-sm font-medium text-gray-700 mb-1">Расчетный месяц</label>
+                            <select id="${service}-month" name="month" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150 shadow-sm">
+                                ${monthOptions}
+                            </select>
+                        </div>
+                        <div>
+                            <label for="${service}-year" class="block text-sm font-medium text-gray-700 mb-1">Расчетный год</label>
+                            <select id="${service}-year" name="year" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150 shadow-sm">
+                                ${yearOptions}
+                            </select>
+                        </div>
+                    </div>
+                    <!-- КОНЕЦ НОВЫХ ПОЛЕЙ -->
 
                     ${metered ? `
                         <div class="mb-4">
@@ -777,12 +823,19 @@
             } else if (metered && safeReadings.length < 2) {
                 consumptionInfo = `<p class="mt-4 pt-4 border-t border-gray-200 text-sm text-gray-500">Нужно минимум 2 показания для расчета расхода.</p>`;
             }
+            
+            // --- НОВОЕ: Получаем период ---
+            const period = (latest && typeof latest.billingMonth === 'number' && latest.billingYear) 
+                            ? `${getMonthName(latest.billingMonth)} ${latest.billingYear}` 
+                            : 'N/A';
+            // ---
 
             return `
                 <h3 class="text-xl font-semibold mb-4 text-gray-800">Последние данные</h3>
                 ${latest ? `
                     <div class="space-y-3">
                         <p><strong>Дата внесения:</strong> <span class="text-blue-600">${formatDate(latest.createdAt)}</span></p>
+                        <p><strong>Расчетный период:</strong> <span class="text-blue-600 font-medium">${period}</span></p> <!-- НОВАЯ СТРОКА -->
                         ${metered ? `<p><strong>Последнее показание:</strong> <span class="text-blue-600 font-medium">${typeof latest.reading === 'number' ? latest.reading.toFixed(service === 'Heat' ? 6 : 2) : 'N/A'}</span></p>` : ''}
                         <p><strong>Последняя сумма:</strong> <span class="text-red-600 font-bold text-xl">${formatCurrency(latest.cost)}</span></p>
                         <p class="text-sm text-gray-500 mt-2"><strong>Примечание:</strong> ${latest.notes || '-'}</p>
@@ -1220,11 +1273,17 @@ const FIREBASE_CONFIG_MANUAL = {
                     const readingEl = form.querySelector(`[name="reading"]`); // Более надежный поиск
                      const costEl = form.querySelector(`[name="cost"]`);
                      const notesEl = form.querySelector(`[name="notes"]`);
+                    // --- НОВОЕ: Получаем значения месяца и года ---
+                    const monthEl = form.querySelector(`[name="month"]`);
+                    const yearEl = form.querySelector(`[name="year"]`);
                     
                     // Проверка наличия элементов перед чтением value
                     const readingValue = readingEl ? readingEl.value : '0'; 
                     const costValue = costEl ? costEl.value : '';
                     const notesValue = notesEl ? notesEl.value : '';
+                    const billingMonth = monthEl ? monthEl.value : new Date().getMonth();
+                    const billingYear = yearEl ? yearEl.value : new Date().getFullYear();
+                    // ---
 
                     const reading = isMetered(service) ? parseFloat(readingValue) : 0;
                     const cost = parseFloat(costValue);
@@ -1235,10 +1294,14 @@ const FIREBASE_CONFIG_MANUAL = {
                          return;
                     }
 
-                    const readingData = { reading, cost, notes };
+                    const readingData = { reading, cost, notes, billingMonth, billingYear }; // --- ИЗМЕНЕНО: Добавлены новые данные ---
                     const success = await addReading(service, readingData);
                     if (success) {
                         form.reset();
+                        // --- ИЗМЕНЕНО: Сбрасываем селекторы на текущую дату ---
+                        if (monthEl) monthEl.value = new Date().getMonth();
+                        if (yearEl) yearEl.value = new Date().getFullYear();
+                        // ---
                         if(readingEl && isMetered(service)) readingEl.focus(); 
                         else if (costEl) costEl.focus(); // Фокус на сумме для не-счетчиков
                     }
@@ -1283,11 +1346,19 @@ const FIREBASE_CONFIG_MANUAL = {
             dataServiceKeys.forEach(service => {
                  const serviceReadings = allData[service] || []; // Гарантируем массив
                  const filtered = serviceReadings.filter(item => {
-                     if (!item.createdAt) return false;
-                     const date = item.createdAt.toDate();
-                     const isYearMatch = date.getFullYear() === selectedYear;
-                     const isMonthMatch = selectedMonth === -1 || date.getMonth() === selectedMonth;
+                     // --- ИЗМЕНЕНА ЛОГИКА ФИЛЬТРАЦИИ ---
+                     // Теперь фильтруем по расчетному периоду (billingYear, billingMonth),
+                     // а не по дате создания (createdAt)
+                     
+                     // Пропускаем старые данные, у которых нет периода
+                     if (typeof item.billingYear !== 'number' || typeof item.billingMonth !== 'number') {
+                         return false; 
+                     }
+                     
+                     const isYearMatch = item.billingYear === selectedYear;
+                     const isMonthMatch = selectedMonth === -1 || item.billingMonth === selectedMonth; // -1 = "Все месяцы"
                      return isYearMatch && isMonthMatch;
+                     // --- КОНЕЦ ИЗМЕНЕНИЙ ---
                  });
                  
                  const serviceTotal = filtered.reduce((sum, item) => sum + (item.cost || 0), 0);
@@ -1429,6 +1500,7 @@ const FIREBASE_CONFIG_MANUAL = {
     </script>
 </body>
 </html>
+
 
 
 
