@@ -64,7 +64,6 @@
                     <li class="nav-item">
                         <a href="#" data-view="Electricity" class="block p-4 sm:px-6 hover:bg-blue-800 transition duration-150 border-b-2 border-blue-700 sm:border-b-0">Электроэнергия</a>
                     </li>
-                    <!-- ИЗМЕНЕНО: Тепловая энергия (Heat) -->
                     <li class="nav-item">
                         <a href="#" data-view="Heat" class="block p-4 sm:px-6 hover:bg-blue-800 transition duration-150 border-b-2 border-blue-700 sm:border-b-0">Тепло</a>
                     </li>
@@ -73,6 +72,10 @@
                     </li>
                     <li class="nav-item">
                         <a href="#" data-view="ManagementCompany" class="block p-4 sm:px-6 hover:bg-blue-800 transition duration-150 border-b-2 border-blue-700 sm:border-b-0">УК Восточный луч</a>
+                    </li>
+                    <!-- НОВАЯ ВКЛАДКА: Настройки -->
+                     <li class="nav-item">
+                        <a href="#" data-view="Configuration" class="block p-4 sm:px-6 hover:bg-blue-800 transition duration-150 border-b-2 border-blue-700 sm:border-b-0">Настройки</a>
                     </li>
                 </ul>
             </nav>
@@ -91,10 +94,11 @@
                 <!-- Остальные представления скрыты по умолчанию -->
                 <div id="Water-view" class="view-content hidden"></div>
                 <div id="Electricity-view" class="view-content hidden"></div>
-                <!-- НОВЫЙ КОНТЕЙНЕР ДЛЯ ТЕПЛА -->
                 <div id="Heat-view" class="view-content hidden"></div>
                 <div id="Garbage-view" class="view-content hidden"></div>
                 <div id="ManagementCompany-view" class="view-content hidden"></div>
+                <!-- НОВЫЙ КОНТЕЙНЕР ДЛЯ НАСТРОЕК -->
+                <div id="Configuration-view" class="view-content hidden"></div>
             </div>
 
             <!-- Глобальный индикатор загрузки -->
@@ -111,35 +115,35 @@
         // Импорты Firebase SDK
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, collection, query, onSnapshot, orderBy, where, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // Добавлен getDocs для экспорта
+        import { getFirestore, doc, collection, query, onSnapshot, orderBy, where, addDoc, serverTimestamp, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Глобальные переменные Canvas среды для Firebase
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        let firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        let firebaseConfig = {}; // Начинаем с пустого объекта
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
         // ----------------------------------------------------------------------
         // !!! СЕКЦИЯ КОНФИГУРАЦИИ FIREBASE ДЛЯ GITHUB PAGES !!!
-        // Если вы видите ошибку "Ошибка инициализации базы данных", значит, вы
-        // запускаете код вне Canvas. Вставьте здесь ваш JSON-объект конфигурации
-        // Firebase (из настроек вашего проекта) для статического хостинга.
-        // Оставьте пустым, если запускаете в среде Canvas.
         // ----------------------------------------------------------------------
         const FIREBASE_CONFIG_MANUAL = {
-                apiKey: "AIzaSyDc8jODJCdUBdzoampsUN5m7KcCP59yhe0",
-                authDomain: "kommunalka-web.firebaseapp.com",
-                projectId: "kommunalka-web",
-                storageBucket: "kommunalka-web.firebasestorage.app",
-                messagingSenderId: "186335218379",
-                appId: "1:186335218379:web:4fc430c4031f6581e2294e",
-                measurementId: "G-H3CNXBW7BF"
+			apiKey: "AIzaSyDc8jODJCdUBdzoampsUN5m7KcCP59yhe0",
+			authDomain: "kommunalka-web.firebaseapp.com",
+			projectId: "kommunalka-web",
+			storageBucket: "kommunalka-web.firebasestorage.app",
+			messagingSenderId: "186335218379",
+			appId: "1:186335218379:web:4fc430c4031f6581e2294e",
+			measurementId: "G-H3CNXBW7BF"
         };
         // ----------------------------------------------------------------------
 
-        // Если глобальная переменная Canvas не определена (запуск на GitHub Pages)
-        // и MANUAL_FIREBASE_CONFIG заполнен, используем его.
-        if (Object.keys(firebaseConfig).length === 0 && Object.keys(FIREBASE_CONFIG_MANUAL).length > 0 && FIREBASE_CONFIG_MANUAL.apiKey) {
+        // Принудительно используем FIREBASE_CONFIG_MANUAL, если она заполнена.
+        if (Object.keys(FIREBASE_CONFIG_MANUAL).length > 0 && FIREBASE_CONFIG_MANUAL.apiKey) {
              firebaseConfig = FIREBASE_CONFIG_MANUAL;
+             console.log("Using MANUAL Firebase Config."); 
+        } else {
+             console.warn("MANUAL Firebase Config is empty. Attempting to use Canvas config (if available).");
+             firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
         }
 
         let db;
@@ -217,10 +221,9 @@
 
         function initializeFirebase() {
             try {
-                // ПРОВЕРКА: Если конфигурация пуста (потому что не в Canvas и не вставили вручную)
+                // ПРОВЕРКА: Если конфигурация пуста
                  if (!firebaseConfig || !firebaseConfig.apiKey) {
-                     // Бросаем ошибку, чтобы перейти в блок catch с подробным сообщением
-                     throw new Error("Missing Firebase API Key. Please insert your Firebase config manually in the script.");
+                     throw new Error("Missing Firebase API Key. Please check FIREBASE_CONFIG_MANUAL or ensure Canvas config is provided.");
                  }
 
                 const app = initializeApp(firebaseConfig);
@@ -231,43 +234,62 @@
                 
                 // Аутентификация: сначала пробуем кастомный токен, затем анонимный вход
                 if (initialAuthToken) {
-                    signInWithCustomToken(auth, initialAuthToken)
-                        .catch(error => {
-                            console.error("Custom token sign-in failed. Falling back to anonymous.", error);
-                            signInAnonymously(auth);
+                     // Добавим try...catch вокруг signInWithCustomToken, чтобы поймать ошибку конфигурации
+                     signInWithCustomToken(auth, initialAuthToken).catch(error => {
+                        console.error("Custom token sign-in failed:", error);
+                        // Если ошибка - configuration-not-found, НЕ ПЫТАЕМСЯ войти анонимно, а показываем ошибку
+                        if (error.code === 'auth/configuration-not-found') {
+                            throw error; // Перебрасываем ошибку в основной catch
+                        }
+                        // Для других ошибок пробуем анонимный вход
+                        console.log("Falling back to anonymous sign-in...");
+                        signInAnonymously(auth).catch(anonError => {
+                             console.error("Anonymous sign-in also failed:", anonError);
+                             throw anonError; // Перебрасываем и эту ошибку
                         });
+                     });
                 } else {
-                    signInAnonymously(auth);
+                     signInAnonymously(auth).catch(anonError => {
+                        console.error("Anonymous sign-in failed:", anonError);
+                        throw anonError; // Перебрасываем ошибку в основной catch
+                     });
                 }
 
                 // Слушатель состояния аутентификации
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
+                        console.log("Firebase Auth Success. User:", user.uid); // Лог успешной авторизации
                         isAuthReady = true;
                         document.getElementById('global-loading').classList.add('hidden');
-                        
-                        // Запуск слушателей данных только после готовности авторизации
                         setupRealtimeListeners();
                     } else {
+                        console.log("Firebase Auth State: No user signed in.");
                         isAuthReady = false;
-                        document.getElementById('global-loading').classList.remove('hidden');
+                        // Не показываем загрузчик, если была ошибка инициализации/аутентификации
+                        // document.getElementById('global-loading').classList.remove('hidden');
                     }
                 });
 
             } catch (error) {
-                console.error("Failed to initialize Firebase:", error);
+                console.error("Failed to initialize or authenticate with Firebase:", error);
                 
-                // Выводим информативное сообщение для пользователя
+                // Улучшенное сообщение об ошибке
+                let errorMessage = `Произошла ошибка при подключении к Firebase. Проверьте консоль разработчика для деталей (${error.code || error.message}).`;
+                if (error.code === 'auth/configuration-not-found') {
+                    errorMessage = `Ошибка конфигурации Firebase (auth/configuration-not-found). 
+                                     Убедитесь, что методы входа (особенно 'Анонимный вход') 
+                                     включены в консоли Firebase для вашего проекта (${firebaseConfig.projectId || 'N/A'}). 
+                                     Перейдите в Firebase Console -> Authentication -> Sign-in method.`;
+                } else if (error.message.includes("API Key")) {
+                     errorMessage = `Не удалось найти конфигурацию Firebase. Убедитесь, что объект 
+                                     <code class="bg-red-200 p-[2px] rounded font-mono">FIREBASE_CONFIG_MANUAL</code> 
+                                     заполнен корректно.`;
+                }
+
                 document.getElementById('global-loading').innerHTML = 
                     `<div class="max-w-md mx-auto p-4 bg-red-100 border border-red-400 text-red-700 rounded-xl shadow-lg mt-10">
-                        <p class="font-bold text-lg mb-2">⚠ Ошибка инициализации базы данных</p>
-                        <p class="text-sm">
-                            Вероятно, вы запускаете код на GitHub Pages или локально. 
-                            Для корректной работы с Firestore необходимо вставить ваш JSON-объект 
-                            конфигурации Firebase (apiKey, projectId и т.д.) 
-                            в переменную <code class="bg-red-200 p-[2px] rounded font-mono">FIREBASE_CONFIG_MANUAL</code> 
-                            внутри тега <code class="bg-red-200 p-[2px] rounded font-mono">&lt;script&gt;</code>.
-                        </p>
+                        <p class="font-bold text-lg mb-2">⚠ Ошибка Firebase</p>
+                        <p class="text-sm">${errorMessage}</p>
                     </div>`;
             }
         }
@@ -277,14 +299,13 @@
         /** Получает путь к публичной коллекции для всех данных */
         function getCollectionPath() {
             // Используем ПУБЛИЧНЫЙ путь для сохранения данных, не привязанных к уникальному ID
-            // Путь: /artifacts/{appId}/public/data/utility_readings
             return `/artifacts/${appId}/public/data/utility_readings`;
         }
         
         /** Добавляет новую запись в Firestore */
         async function addReading(service, readingData) {
             if (!isAuthReady) {
-                showMessage('Подождите, идет авторизация...', 'error');
+                showMessage('Подождите, идет авторизация или произошла ошибка.', 'error');
                 return false;
             }
             try {
@@ -293,10 +314,10 @@
                 const dataToSave = {
                     ...readingData,
                     service: service,
-                    reading: parseFloat(readingData.reading || 0), // Default to 0 if not metered
+                    reading: parseFloat(readingData.reading || 0), 
                     cost: parseFloat(readingData.cost),
                     notes: readingData.notes || '',
-                    createdAt: serverTimestamp() // Время создания на сервере для сортировки
+                    createdAt: serverTimestamp() 
                 };
 
                 await addDoc(collectionRef, dataToSave);
@@ -311,80 +332,336 @@
         
         // --- Реагирование на изменения данных в реальном времени ---
 
-        const serviceKeys = ['Water', 'Electricity', 'Heat', 'Garbage', 'ManagementCompany'];
+        const serviceKeys = ['Water', 'Electricity', 'Heat', 'Garbage', 'ManagementCompany', 'Configuration']; 
         
         /** Настраивает onSnapshot для получения всех данных в реальном времени */
         function setupRealtimeListeners() {
+             // Добавляем проверку, чтобы не запускать слушатель, если авторизация не прошла
+             if (!isAuthReady) {
+                 console.warn("Skipping Firestore listener setup: Auth not ready.");
+                 return;
+             }
+            console.log("Setting up Firestore real-time listener..."); // Лог запуска слушателя
+
             const collectionRef = collection(db, getCollectionPath());
-            
-            // Запрос: все записи, отсортированные по времени создания (новые сверху)
-            const q = query(collectionRef, orderBy('createdAt', 'desc'));
+            const q = query(collectionRef); 
 
             onSnapshot(q, (snapshot) => {
-                const newReadings = {};
-                serviceKeys.forEach(key => newReadings[key] = []); // Гарантируем, что все ключи существуют и являются массивами
+                console.log(`Firestore snapshot received: ${snapshot.docs.length} documents.`); // Лог получения данных
+                const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-                snapshot.docs.forEach(doc => {
-                    const data = doc.data();
-                    // Преобразование в числа
+                docs.sort((a, b) => {
+                    const aTime = a.createdAt ? a.createdAt.toDate().getTime() : 0;
+                    const bTime = b.createdAt ? b.createdAt.toDate().getTime() : 0;
+                    return bTime - aTime; 
+                });
+	
+                const newReadings = {};
+                ['Water', 'Electricity', 'Heat', 'Garbage', 'ManagementCompany'].forEach(key => newReadings[key] = []); 
+
+                docs.forEach(data => {
                     data.reading = data.reading ? parseFloat(data.reading) : 0;
                     data.cost = data.cost ? parseFloat(data.cost) : 0;
                     
                     if (data.service && newReadings[data.service]) {
-                        newReadings[data.service].push({ id: doc.id, ...data });
+                        newReadings[data.service].push(data);
                     }
                 });
                 
                 allReadings = newReadings;
                 
-                // Перерисовка всех представлений с новыми данными
-                // При обновлении данных, мы перерисовываем Сводку с текущими выбранными фильтрами
                 const currentYear = parseInt(document.getElementById('summary-year')?.value || new Date().getFullYear());
                 const currentMonth = parseInt(document.getElementById('summary-month')?.value || new Date().getMonth());
                 
                 renderSummaryView(allReadings, currentYear, currentMonth);
-                serviceKeys.forEach(service => renderServiceView(service, allReadings[service]));
-                
+                serviceKeys.filter(s => s !== 'Configuration').forEach(service => {
+                    // Проверяем, существует ли ключ в newReadings перед передачей
+                    renderServiceView(service, newReadings[service] || []) 
+                });
+                if (currentView === 'Configuration') {
+                     renderServiceView('Configuration', []); 
+                }
+
             }, (error) => {
                 console.error("Error setting up real-time listener: ", error);
                 showMessage('Ошибка получения данных в реальном времени.', 'error');
+                 // Можно добавить отображение ошибки в UI, если нужно
+                 document.getElementById('global-loading').innerHTML = 
+                    `<div class="max-w-md mx-auto p-4 bg-red-100 border border-red-400 text-red-700 rounded-xl shadow-lg mt-10">
+                         <p class="font-bold text-lg mb-2">⚠ Ошибка получения данных</p>
+                         <p class="text-sm">Не удалось подключиться к базе данных для получения обновлений (${error.code || error.message}). Проверьте настройки Firebase и подключение к интернету.</p>
+                     </div>`;
+                 document.getElementById('global-loading').classList.remove('hidden'); // Показываем блок ошибки
+            });
+        }
+        
+        // --- Логика экспорта/импорта (новая) ---
+        // ... (Код exportData, importData, setupConfigurationListeners без изменений) ...
+        async function exportData() {
+            if (!db || !isAuthReady) {
+                showMessage('База данных не готова или нет авторизации.', 'error');
+                return;
+            }
+            
+            const collectionRef = collection(db, getCollectionPath());
+            const snapshot = await getDocs(collectionRef);
+            
+            let hasData = snapshot.docs.length > 0;
+            
+            if (!hasData) {
+                showMessage('Нет данных для экспорта!', 'error');
+                return;
+            }
+
+            const cleanData = {};
+            ['Water', 'Electricity', 'Heat', 'Garbage', 'ManagementCompany'].forEach(service => {
+                cleanData[service] = [];
+            });
+
+            snapshot.docs.forEach(doc => {
+                 const data = doc.data();
+                 const service = data.service;
+                 if (cleanData[service]) {
+                      // Сохраняем дату как строку ISO для совместимости при импорте
+                      const dateString = data.createdAt ? data.createdAt.toDate().toISOString() : null; 
+                      cleanData[service].push({
+                         cost: data.cost || 0,
+                         notes: data.notes || '',
+                         reading: data.reading || 0,
+                         service: data.service,
+                         // Добавляем дату в формате ISO строки
+                         dateExported: dateString 
+                     });
+                 }
+            });
+             // Сортируем каждую услугу по дате перед экспортом (от старых к новым)
+             for (const service in cleanData) {
+                 cleanData[service].sort((a, b) => {
+                     const dateA = a.dateExported ? new Date(a.dateExported).getTime() : 0;
+                     const dateB = b.dateExported ? new Date(b.dateExported).getTime() : 0;
+                     return dateA - dateB; // Сортировка по возрастанию даты
+                 });
+             }
+
+
+            const filename = `utility_readings_export_${new Date().toISOString().slice(0, 10)}.json`;
+            const jsonString = JSON.stringify(cleanData, null, 2);
+
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            showMessage(`Данные успешно экспортированы в ${filename}`, 'success');
+        }
+
+        async function importData(data) {
+            if (!db || !isAuthReady) {
+                showMessage('База данных не готова или нет авторизации.', 'error');
+                return;
+            }
+
+            if (!data || typeof data !== 'object') {
+                showMessage('Некорректный формат данных для импорта.', 'error');
+                return;
+            }
+            
+            if (!data.Water && !data.Electricity && !data.Heat && !data.Garbage && !data.ManagementCompany) {
+                 showMessage('Некорректная структура JSON. Ожидается объект с ключами услуг (Water, Electricity и т.д.).', 'error');
+                 return;
+            }
+
+            // Запрос подтверждения у пользователя
+             const confirmation = window.prompt("Вы уверены, что хотите импортировать данные? Это добавит записи из файла в текущую базу данных. Введите 'ДА' для подтверждения.");
+             if (confirmation !== 'ДА') {
+                 showMessage('Импорт отменен.', 'info');
+                 return;
+             }
+
+            const collectionRef = collection(db, getCollectionPath());
+            let importedCount = 0;
+            let skippedCount = 0; // Счетчик пропущенных записей (возможно, дубликатов) - пока не реализован
+            const importPromises = []; // Массив для параллельного добавления
+
+            showMessage('Начинаем импорт... Это может занять некоторое время.', 'info');
+
+            for (const serviceKey in data) {
+                const records = data[serviceKey];
+                if (Array.isArray(records)) {
+                     // Сортируем записи по дате перед импортом (от старых к новым)
+                     records.sort((a, b) => {
+                         const dateA = a.dateExported ? new Date(a.dateExported).getTime() : 0;
+                         const dateB = b.dateExported ? new Date(b.dateExported).getTime() : 0;
+                         return dateA - dateB;
+                     });
+                    
+                    for (const record of records) {
+                        if (record.service && record.service === serviceKey && typeof record.cost === 'number') {
+                             // Преобразуем дату из строки ISO обратно в Timestamp Firestore, если она есть
+                             let recordTimestamp = serverTimestamp(); // По умолчанию - текущее время
+                             if (record.dateExported) {
+                                 try {
+                                     // Пытаемся создать объект Date из строки ISO
+                                     const recordDate = new Date(record.dateExported);
+                                     // Проверяем, что дата валидна
+                                     if (!isNaN(recordDate.getTime())) { 
+                                         // Firebase ожидает Timestamp или объект Date
+                                         recordTimestamp = recordDate; 
+                                     } else {
+                                          console.warn(`Неверный формат даты '${record.dateExported}' для записи ${serviceKey}, используем текущее время.`);
+                                     }
+                                 } catch (dateError) {
+                                     console.warn(`Ошибка парсинга даты '${record.dateExported}' для записи ${serviceKey}, используем текущее время.`, dateError);
+                                 }
+                             }
+
+                            const dataToSave = {
+                                service: record.service,
+                                reading: record.reading || 0,
+                                cost: record.cost,
+                                notes: record.notes || '',
+                                createdAt: recordTimestamp // Используем восстановленную или текущую дату
+                            };
+                            // Добавляем обещание добавления в массив
+                             importPromises.push(addDoc(collectionRef, dataToSave).then(() => importedCount++));
+                        } else {
+                             console.warn("Пропущена некорректная запись при импорте:", record);
+                             skippedCount++;
+                        }
+                    }
+                }
+            }
+            
+             // Ожидаем завершения всех операций добавления
+             try {
+                 await Promise.all(importPromises);
+                 if (importedCount > 0) {
+                     showMessage(`Импорт завершен. Добавлено ${importedCount} новых записей. Пропущено: ${skippedCount}.`, 'success');
+                 } else {
+                     showMessage(`Импорт завершен, но не было добавлено ни одной валидной записи. Пропущено: ${skippedCount}. Проверьте структуру JSON.`, skippedCount > 0 ? 'warning' : 'error');
+                 }
+             } catch (error) {
+                  console.error("Ошибка во время массового импорта:", error);
+                  showMessage(`Ошибка во время импорта после добавления ${importedCount} записей. Проверьте консоль.`, 'error');
+             }
+            
+        }
+
+        function setupConfigurationListeners() {
+            document.getElementById('export-data-btn')?.addEventListener('click', exportData);
+            
+            const fileInput = document.getElementById('import-file-input');
+            const selectFileBtn = document.getElementById('select-file-btn');
+            const importDataBtn = document.getElementById('import-data-btn');
+            const fileStatus = document.getElementById('import-file-status');
+            let importedFileContent = null;
+
+            selectFileBtn?.addEventListener('click', () => fileInput.click());
+
+            fileInput?.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    fileStatus.textContent = `Выбран файл: ${file.name}`;
+                    importDataBtn.disabled = false;
+                    importDataBtn.classList.remove('bg-gray-400', 'disabled:opacity-50');
+                    importDataBtn.classList.add('bg-green-600', 'hover:bg-green-700');
+
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        try {
+                            importedFileContent = JSON.parse(event.target.result);
+                            showMessage('Файл JSON успешно прочитан. Готов к импорту.', 'success');
+                        } catch (error) {
+                            showMessage('Ошибка чтения файла: Неверный формат JSON.', 'error');
+                            importedFileContent = null;
+                            importDataBtn.disabled = true;
+                            importDataBtn.classList.add('bg-gray-400', 'disabled:opacity-50');
+                            importDataBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+                        }
+                    };
+                     reader.onerror = () => {
+                         showMessage('Не удалось прочитать файл.', 'error');
+                          importedFileContent = null;
+                         importDataBtn.disabled = true;
+                         importDataBtn.classList.add('bg-gray-400', 'disabled:opacity-50');
+                         importDataBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+                     };
+                    reader.readAsText(file);
+                } else {
+                    fileStatus.textContent = 'Файл не выбран.';
+                    importedFileContent = null;
+                    importDataBtn.disabled = true;
+                    importDataBtn.classList.add('bg-gray-400', 'disabled:opacity-50');
+                    importDataBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+                }
+            });
+
+            importDataBtn?.addEventListener('click', () => {
+                if (importedFileContent) {
+                    importData(importedFileContent); 
+                } else {
+                    showMessage('Сначала выберите корректный JSON-файл.', 'error');
+                }
             });
         }
         
         // --- Логика рендеринга представлений ---
-
+        // ... (Код getServiceDisplayName, isMetered, renderHistoryTable, renderForm, renderLatestInfoContent, renderCalculatorBlock без изменений) ...
         function getServiceDisplayName(key) {
             const names = {
                 'Water': 'Вода',
                 'Electricity': 'Электроэнергия',
-                'Heat': 'Тепло', // ИЗМЕНЕНО
+                'Heat': 'Тепло', 
                 'Garbage': 'Экооператор (Мусор)',
                 'ManagementCompany': 'УК Восточный луч',
-                'Summary': 'Сводка'
+                'Summary': 'Сводка',
+                'Configuration': 'Настройки' 
             };
             return names[key] || key;
         }
         
-        /** Проверка, требуется ли счетчик для услуги */
         function isMetered(service) {
-            // Теперь Тепловая энергия также со счетчиком (Гкал)
             return ['Water', 'Electricity', 'Heat'].includes(service);
         }
 
-        /** Рендеринг таблицы истории платежей */
         function renderHistoryTable(service, readings) {
+             if (service === 'Configuration' || !readings) return '';
+
             const metered = isMetered(service);
             
-            const tableRows = readings.map((r, index) => {
-                // Предыдущее показание для расчета расхода
-                const previousReading = (index < readings.length - 1) ? readings[index + 1].reading : null;
-                const consumption = previousReading !== null ? r.reading - previousReading : null;
+             // Убедимся, что readings это массив перед использованием map
+             const safeReadings = Array.isArray(readings) ? readings : [];
+            
+            const tableRows = safeReadings.map((r, index) => {
+                const previousReading = (index < safeReadings.length - 1) ? safeReadings[index + 1].reading : null;
+                // Добавим проверку, что r.reading определено
+                const consumption = previousReading !== null && typeof r.reading === 'number' 
+                                      ? r.reading - previousReading 
+                                      : null;
+                // Определим точность для показаний и расхода
+                let readingPrecision = 2;
+                let consumptionPrecision = 2;
+                if (service === 'Heat') {
+                     readingPrecision = 6;
+                     consumptionPrecision = 6;
+                } else if (service === 'Electricity') {
+                     // Можно оставить 2 знака, но часто используют целые или 1 знак
+                     readingPrecision = 2; 
+                     consumptionPrecision = 2;
+                }
+
 
                 return `
                     <tr class="border-b hover:bg-gray-50 transition duration-100">
                         <td class="px-2 py-3 sm:p-3 text-sm font-medium text-gray-900">${r.createdAt ? formatDate(r.createdAt) : 'N/A'}</td>
-                        ${metered ? `<td class="px-2 py-3 sm:p-3 text-sm">${r.reading.toFixed(2)}</td>` : ''}
-                        ${metered ? `<td class="px-2 py-3 sm:p-3 text-sm text-blue-600">${consumption !== null ? consumption.toFixed(2) : '-'}</td>` : ''}
+                        ${metered ? `<td class="px-2 py-3 sm:p-3 text-sm">${typeof r.reading === 'number' ? r.reading.toFixed(readingPrecision) : 'N/A'}</td>` : ''}
+                        ${metered ? `<td class="px-2 py-3 sm:p-3 text-sm text-blue-600">${consumption !== null ? consumption.toFixed(consumptionPrecision) : '-'}</td>` : ''}
                         <td class="px-2 py-3 sm:p-3 text-sm font-semibold">${formatCurrency(r.cost)}</td>
                         <td class="px-2 py-3 sm:p-3 text-xs text-gray-500 max-w-xs truncate">${r.notes || '-'}</td>
                     </tr>
@@ -414,15 +691,24 @@
             `;
         }
 
-        /** Рендеринг формы ввода данных */
         function renderForm(service) {
+             if (service === 'Configuration') return '';
+
             const metered = isMetered(service);
             const displayName = getServiceDisplayName(service);
             let placeholderReading = 'Например, 123.45';
+             let stepValue = "0.01"; // Шаг по умолчанию
             
-            if (service === 'Water') placeholderReading = 'Общий м³';
-            else if (service === 'Electricity') placeholderReading = 'Общий кВтч';
-            else if (service === 'Heat') placeholderReading = 'Общий Гкал';
+            if (service === 'Water') {
+                 placeholderReading = 'Общий м³';
+                 stepValue = "0.01";
+            } else if (service === 'Electricity') {
+                 placeholderReading = 'Общий кВтч';
+                 stepValue = "0.01"; // Или "1" если показания целые
+            } else if (service === 'Heat') {
+                 placeholderReading = 'Общий Гкал';
+                 stepValue = "0.000001";
+            }
 
 
             return `
@@ -432,7 +718,7 @@
                     ${metered ? `
                         <div class="mb-4">
                             <label for="${service}-reading" class="block text-sm font-medium text-gray-700 mb-1">Текущее показание счетчика (${service === 'Water' ? 'Общий м³' : service === 'Electricity' ? 'Общий кВтч' : 'Общий Гкал'})</label>
-                            <input type="number" step="0.01" id="${service}-reading" name="reading" required 
+                            <input type="number" step="${stepValue}" id="${service}-reading" name="reading" required 
                                 class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150 shadow-sm" placeholder="${placeholderReading}">
                         </div>
                     ` : `
@@ -459,28 +745,36 @@
             `;
         }
         
-        /** Рендеринг информационного блока о последних данных */
         function renderLatestInfoContent(service, readings) {
-            const latest = readings.length > 0 ? readings[0] : null;
-            const previous = readings.length > 1 ? readings[1] : null;
+             if (service === 'Configuration' || !readings) return '';
+             
+             // Убедимся, что readings это массив
+             const safeReadings = Array.isArray(readings) ? readings : [];
+
+            const latest = safeReadings.length > 0 ? safeReadings[0] : null;
+            const previous = safeReadings.length > 1 ? safeReadings[1] : null;
             const metered = isMetered(service);
             
             let consumptionInfo = '';
-            if (latest && previous && metered) {
+            if (latest && previous && metered && typeof latest.reading === 'number' && typeof previous.reading === 'number') {
                 const consumption = latest.reading - previous.reading;
                 let unit = '';
+                let precision = 2;
                 if (service === 'Water') unit = 'м³';
                 else if (service === 'Electricity') unit = 'кВтч';
-                else if (service === 'Heat') unit = 'Гкал';
+                else if (service === 'Heat') {
+                     unit = 'Гкал';
+                     precision = 6;
+                }
 
                 consumptionInfo = `
                     <div class="mt-4 pt-4 border-t border-gray-200">
                         <p class="text-gray-600 font-semibold mb-2">Расход за период:</p>
-                        <p class="text-3xl font-bold text-blue-600">${consumption.toFixed(service === 'Heat' ? 6 : 2)}</p>
+                        <p class="text-3xl font-bold text-blue-600">${consumption.toFixed(precision)}</p>
                         <p class="text-sm text-gray-500">${unit}</p>
                     </div>
                 `;
-            } else if (metered && readings.length < 2) {
+            } else if (metered && safeReadings.length < 2) {
                 consumptionInfo = `<p class="mt-4 pt-4 border-t border-gray-200 text-sm text-gray-500">Нужно минимум 2 показания для расчета расхода.</p>`;
             }
 
@@ -489,7 +783,7 @@
                 ${latest ? `
                     <div class="space-y-3">
                         <p><strong>Дата внесения:</strong> <span class="text-blue-600">${formatDate(latest.createdAt)}</span></p>
-                        ${metered ? `<p><strong>Последнее показание:</strong> <span class="text-blue-600 font-medium">${latest.reading.toFixed(service === 'Heat' ? 6 : 2)}</span></p>` : ''}
+                        ${metered ? `<p><strong>Последнее показание:</strong> <span class="text-blue-600 font-medium">${typeof latest.reading === 'number' ? latest.reading.toFixed(service === 'Heat' ? 6 : 2) : 'N/A'}</span></p>` : ''}
                         <p><strong>Последняя сумма:</strong> <span class="text-red-600 font-bold text-xl">${formatCurrency(latest.cost)}</span></p>
                         <p class="text-sm text-gray-500 mt-2"><strong>Примечание:</strong> ${latest.notes || '-'}</p>
                     </div>
@@ -500,36 +794,35 @@
             `;
         }
         
-        /** Рендеринг калькулятора тарифов */
         function renderCalculatorBlock(service, readings) {
+             if (service === 'Configuration') return '';
             if (!isMetered(service)) return '';
+            
+            // Убедимся, что readings это массив
+            const safeReadings = Array.isArray(readings) ? readings : [];
 
-            const latestReading = (readings && readings.length > 0) ? readings[0].reading : 0;
+            const latestReadingValue = (safeReadings.length > 0 && typeof safeReadings[0].reading === 'number') 
+                                        ? safeReadings[0].reading 
+                                        : 0;
             const isWater = service === 'Water';
             const isElectricity = service === 'Electricity';
             const isHeat = service === 'Heat';
             
-            // ТАРИФЫ
+            const prefix = `${service}-calc-`;
             
+            // ... (остальной код renderCalculatorBlock без изменений, но теперь использует latestReadingValue) ...
             if (isWater) {
-                 // **Сложный калькулятор для воды с раздельными счетчиками и фиксированными тарифами**
-                const latestReadingHVS = latestReading; // Используем общие показания для пре-заполнения ХВС
-                
+                const latestReadingHVS = latestReadingValue; 
                 return `
                     <div id="${service}-calculator" class="bg-white p-4 sm:p-6 rounded-xl shadow-lg border-t-4 border-purple-500">
                         <h3 class="text-xl font-semibold mb-4 text-gray-800 flex items-center">Калькулятор тарифов (Вода)</h3>
-
-                        <!-- Тарифы (Справочно) -->
                         <div class="mb-5 p-3 bg-purple-50 rounded-lg border border-purple-200 text-sm">
                             <p><strong>Водопотребление (ХВС/ГВС):</strong> 46.10 руб./м³</p>
                             <p><strong>Водоотведение (общий расход):</strong> 35.17 руб./м³</p>
-                            <!-- Hidden inputs for fixed tariffs -->
                             <input type="hidden" id="Water-calc-tariff-hvs" value="46.10">
                             <input type="hidden" id="Water-calc-tariff-disposal" value="35.17">
                         </div>
-
                         <div class="space-y-4">
-                            <!-- 1. Холодное водоснабжение (ХВС) -->
                             <div class="p-3 border rounded-lg border-gray-200">
                                 <p class="font-semibold mb-2 text-blue-700">1. Холодное водоснабжение (ХВС)</p>
                                 <div class="grid grid-cols-2 gap-4">
@@ -548,14 +841,11 @@
                                 </div>
                                 <p id="Water-calc-consumption-hvs" class="mt-2 text-sm font-medium text-gray-600">Расход: 0.00 м³</p>
                             </div>
-
-                            <!-- 2. ХВС на нужды ГВС (Горячая вода) -->
                             <div class="p-3 border rounded-lg border-gray-200">
                                 <p class="font-semibold mb-2 text-orange-600">2. ХВС на нужды ГВС (Горячая вода)</p>
                                 <div class="grid grid-cols-2 gap-4">
                                     <div>
                                         <label for="Water-calc-prev-gvs" class="block text-xs font-medium text-gray-700 mb-1">Предыдущее пок. (м³)</label>
-                                        <!-- Используем 0.00, так как предыдущие показания для ГВС не хранятся отдельно в текущей структуре Firestore -->
                                         <input type="number" step="0.01" id="Water-calc-prev-gvs" 
                                             class="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 focus:bg-white transition duration-150" 
                                             value="0.00" placeholder="0.00">
@@ -570,8 +860,6 @@
                                 <p id="Water-calc-consumption-gvs" class="mt-2 text-sm font-medium text-gray-600">Расход: 0.00 м³</p>
                             </div>
                         </div>
-
-                        <!-- Итоговый расчет -->
                         <div class="mt-6 p-4 bg-purple-100 rounded-lg border-2 border-purple-300">
                             <p class="text-sm font-semibold text-purple-800">Общий расход (Вода + ГВС): <span id="Water-calc-total-consumption" class="font-extrabold">0.00 м³</span></p>
                             <p class="text-sm font-semibold text-purple-800 mt-2">Расчетная сумма к оплате:</p>
@@ -581,12 +869,9 @@
                     </div>
                 `;
             } else if (isElectricity) {
-                 // **Сложный калькулятор для Электроэнергии (ДЕНЬ/НОЧЬ) с фиксированными тарифами**
                 return `
                     <div id="${service}-calculator" class="bg-white p-4 sm:p-6 rounded-xl shadow-lg border-t-4 border-purple-500">
                         <h3 class="text-xl font-semibold mb-4 text-gray-800 flex items-center">Калькулятор тарифов (Энергия)</h3>
-
-                        <!-- Тарифы (Справочно) -->
                         <div class="mb-5 p-3 bg-purple-50 rounded-lg border border-purple-200 text-sm grid grid-cols-2 gap-3">
                             <div>
                                 <p class="font-semibold text-gray-700">Тариф ДЕНЬ (кВтч):</p>
@@ -599,9 +884,7 @@
                                 <input type="hidden" id="Electricity-calc-tariff-night" value="2.39">
                             </div>
                         </div>
-
                         <div class="space-y-4">
-                            <!-- 1. ДНЕВНОЕ потребление -->
                             <div class="p-3 border rounded-lg border-gray-200">
                                 <p class="font-semibold mb-2 text-yellow-700">1. ДЕНЬ (кВтч)</p>
                                 <div class="grid grid-cols-2 gap-4">
@@ -620,8 +903,6 @@
                                 </div>
                                 <p id="Electricity-calc-consumption-day" class="mt-2 text-sm font-medium text-gray-600">Расход: 0.00 кВтч</p>
                             </div>
-
-                            <!-- 2. НОЧНОЕ потребление -->
                             <div class="p-3 border rounded-lg border-gray-200">
                                 <p class="font-semibold mb-2 text-indigo-700">2. НОЧЬ (кВтч)</p>
                                 <div class="grid grid-cols-2 gap-4">
@@ -641,8 +922,6 @@
                                 <p id="Electricity-calc-consumption-night" class="mt-2 text-sm font-medium text-gray-600">Расход: 0.00 кВтч</p>
                             </div>
                         </div>
-
-                        <!-- Итоговый расчет -->
                         <div class="mt-6 p-4 bg-purple-100 rounded-lg border-2 border-purple-300">
                             <p class="text-sm font-semibold text-purple-800">Общий расход: <span id="Electricity-calc-total-consumption" class="font-extrabold">0.00 кВтч</span></p>
                             <p class="text-sm font-semibold text-purple-800 mt-2">Расчетная сумма к оплате:</p>
@@ -652,14 +931,10 @@
                     </div>
                 `;
             } else if (isHeat) {
-                // **Сложный калькулятор для ТЕПЛА (Отопление + Нагрев воды) с фиксированным тарифом**
-                const latestReadingHeat = latestReading; 
-
+                const latestReadingHeat = latestReadingValue; 
                 return `
                     <div id="${service}-calculator" class="bg-white p-4 sm:p-6 rounded-xl shadow-lg border-t-4 border-purple-500">
                         <h3 class="text-xl font-semibold mb-4 text-gray-800 flex items-center">Калькулятор тарифов (Тепло)</h3>
-
-                        <!-- Тарифы (Справочно) -->
                         <div class="mb-5 p-3 bg-purple-50 rounded-lg border border-purple-200 text-sm grid grid-cols-1">
                             <div>
                                 <p class="font-semibold text-gray-700">Тариф за Гкал (Отопление/Нагрев):</p>
@@ -667,9 +942,7 @@
                                 <input type="hidden" id="Heat-calc-tariff-gcal" value="3134.17">
                             </div>
                         </div>
-                        
                         <div class="space-y-4">
-                            <!-- 1. Отопление -->
                             <div class="p-3 border rounded-lg border-gray-200">
                                 <p class="font-semibold mb-2 text-red-700">1. Отопление (Гкал)</p>
                                 <div class="grid grid-cols-2 gap-4">
@@ -688,8 +961,6 @@
                                 </div>
                                 <p id="Heat-calc-consumption-heating" class="mt-2 text-sm font-medium text-gray-600">Расход: 0.000000 Гкал</p>
                             </div>
-
-                            <!-- 2. Тепловая энергия на нагрев воды -->
                             <div class="p-3 border rounded-lg border-gray-200">
                                 <p class="font-semibold mb-2 text-orange-600">2. Нагрев воды (Гкал)</p>
                                 <div class="grid grid-cols-2 gap-4">
@@ -709,8 +980,6 @@
                                 <p id="Heat-calc-consumption-water" class="mt-2 text-sm font-medium text-gray-600">Расход: 0.000000 Гкал</p>
                             </div>
                         </div>
-
-                        <!-- Итоговый расчет -->
                         <div class="mt-6 p-4 bg-purple-100 rounded-lg border-2 border-purple-300">
                             <p class="text-sm font-semibold text-purple-800">Общий расход: <span id="Heat-calc-total-consumption" class="font-extrabold">0.000000 Гкал</span></p>
                             <p class="text-sm font-semibold text-purple-800 mt-2">Расчетная сумма к оплате:</p>
@@ -721,235 +990,218 @@
                 `;
             }
         }
+        // ... (Код calculateUtilityCost, setupCalculatorListeners без изменений) ...
+         function calculateUtilityCost(service) {
+             if (service === 'Configuration') return;
 
-        /** Логика расчета для калькулятора */
-        function calculateUtilityCost(service) {
             const isWater = service === 'Water';
             const isElectricity = service === 'Electricity';
             const isHeat = service === 'Heat';
             const prefix = `${service}-calc-`; 
 
             if (isWater) {
-                // ЛОГИКА ДЛЯ ВОДЫ (СЛОЖНАЯ)
-                
-                // 1. Inputs for HVS (Холодное водоснабжение)
                 const prevHVS = parseFloat(document.getElementById(`${prefix}prev-hvs`)?.value) || 0;
                 const currentHVS = parseFloat(document.getElementById(`${prefix}current-hvs`)?.value) || 0;
-
-                // 2. Inputs for GVS (ХВС на нужды ГВС)
                 const prevGVS = parseFloat(document.getElementById(`${prefix}prev-gvs`)?.value) || 0;
                 const currentGVS = parseFloat(document.getElementById(`${prefix}current-gvs`)?.value) || 0;
-
-                // Tariffs (from hidden inputs, hardcoded from the table)
                 const tariffHVS = parseFloat(document.getElementById(`${prefix}tariff-hvs`)?.value) || 46.10;
                 const tariffDisposal = parseFloat(document.getElementById(`${prefix}tariff-disposal`)?.value) || 35.17;
-
-                // Consumption Calculations
                 let consumptionHVS = (currentHVS >= prevHVS) ? currentHVS - prevHVS : 0;
                 let consumptionGVS = (currentGVS >= prevGVS) ? currentGVS - prevGVS : 0;
-                
-                // Total Consumption
                 const totalConsumption = consumptionHVS + consumptionGVS;
-
-                // Cost Calculations
                 const costHVS = consumptionHVS * tariffHVS;
-                const costGVS = consumptionGVS * tariffHVS; // Same tariff 46.10
+                const costGVS = consumptionGVS * tariffHVS; 
                 const costDisposal = totalConsumption * tariffDisposal;
-                
-                // Total Final Cost
                 const totalCost = costHVS + costGVS + costDisposal;
-
-                // UI Updates
                 const unit = 'м³';
                 document.getElementById(`${prefix}consumption-hvs`).textContent = `Расход: ${consumptionHVS.toFixed(2)} ${unit}`;
                 document.getElementById(`${prefix}consumption-gvs`).textContent = `Расход: ${consumptionGVS.toFixed(2)} ${unit}`;
-                
                 document.getElementById(`${prefix}total-consumption`).textContent = `${totalConsumption.toFixed(2)} ${unit}`;
                 document.getElementById(`${prefix}total-cost`).textContent = formatCurrency(totalCost);
-                
                 return; 
             }
             
             if (isElectricity) {
-                // ЛОГИКА ДЛЯ ЭЛЕКТРОЭНЕРГИИ (Двухтарифный)
-                
-                // Tariffs (Read from hidden/fixed fields)
                 const tariffDay = parseFloat(document.getElementById(`${prefix}tariff-day`)?.value) || 5.72;
                 const tariffNight = parseFloat(document.getElementById(`${prefix}tariff-night`)?.value) || 2.39;
-
-                // Day Readings
                 const prevDay = parseFloat(document.getElementById(`${prefix}prev-day`)?.value) || 0;
                 const currentDay = parseFloat(document.getElementById(`${prefix}current-day`)?.value) || 0;
-                
-                // Night Readings
                 const prevNight = parseFloat(document.getElementById(`${prefix}prev-night`)?.value) || 0;
                 const currentNight = parseFloat(document.getElementById(`${prefix}current-night`)?.value) || 0;
-
-                // Consumption
                 const consumptionDay = (currentDay >= prevDay) ? currentDay - prevDay : 0;
                 const consumptionNight = (currentNight >= prevNight) ? currentNight - prevNight : 0;
                 const totalConsumption = consumptionDay + consumptionNight;
-
-                // Cost
                 const costDay = consumptionDay * tariffDay;
                 const costNight = consumptionNight * tariffNight;
                 const totalCost = costDay + costNight;
-
-                // UI Updates
                 const unit = 'кВтч';
                 document.getElementById(`${prefix}consumption-day`).textContent = `Расход: ${consumptionDay.toFixed(2)} ${unit}`;
                 document.getElementById(`${prefix}consumption-night`).textContent = `Расход: ${consumptionNight.toFixed(2)} ${unit}`;
                 document.getElementById(`${prefix}total-consumption`).textContent = `${totalConsumption.toFixed(2)} ${unit}`;
                 document.getElementById(`${prefix}total-cost`).textContent = formatCurrency(totalCost);
-                
                 return;
             } 
             
             if (isHeat) {
-                // ЛОГИКА ДЛЯ ТЕПЛОВОЙ ЭНЕРГИИ (Отопление + Нагрев воды)
-                
-                // Tariff (Read from hidden/fixed field)
                 const tariffGcal = parseFloat(document.getElementById(`${prefix}tariff-gcal`)?.value) || 3134.17;
-
-                // 1. Heating Readings
                 const prevHeating = parseFloat(document.getElementById(`${prefix}prev-heating`)?.value) || 0;
                 const currentHeating = parseFloat(document.getElementById(`${prefix}current-heating`)?.value) || 0;
-                
-                // 2. Water Readings
                 const prevWater = parseFloat(document.getElementById(`${prefix}prev-water`)?.value) || 0;
                 const currentWater = parseFloat(document.getElementById(`${prefix}current-water`)?.value) || 0;
-
-                // Consumption
                 const consumptionHeating = (currentHeating >= prevHeating) ? currentHeating - prevHeating : 0;
                 const consumptionWater = (currentWater >= prevWater) ? currentWater - prevWater : 0;
                 const totalConsumption = consumptionHeating + consumptionWater;
-
-                // Cost
                 const totalCost = totalConsumption * tariffGcal;
-
-                // UI Updates
                 const unit = 'Гкал';
                 document.getElementById(`${prefix}consumption-heating`).textContent = `Расход: ${consumptionHeating.toFixed(6)} ${unit}`; 
                 document.getElementById(`${prefix}consumption-water`).textContent = `Расход: ${consumptionWater.toFixed(6)} ${unit}`; 
                 document.getElementById(`${prefix}total-consumption`).textContent = `${totalConsumption.toFixed(6)} ${unit}`;
                 document.getElementById(`${prefix}total-cost`).textContent = formatCurrency(totalCost);
-                
                 return;
             }
-            
-            // Если услуга не Water, Electricity, или Heat (т.е. Garbage, ManagementCompany) - нет калькулятора.
-            // Никаких дополнительных действий не требуется.
         }
         
-        /** Прикрепляет слушатели к калькулятору */
         function setupCalculatorListeners(service) {
+             if (service === 'Configuration') return;
+
             const isWater = service === 'Water';
             const isElectricity = service === 'Electricity';
             const isHeat = service === 'Heat';
             const prefix = `${service}-calc-`;
-
             let inputs = [];
 
             if (isWater) {
-                // Слушатели для сложного калькулятора воды
                 inputs = [
-                    document.getElementById(`${prefix}prev-hvs`),
-                    document.getElementById(`${prefix}current-hvs`),
-                    document.getElementById(`${prefix}prev-gvs`),
-                    document.getElementById(`${prefix}current-gvs`),
+                    document.getElementById(`${prefix}prev-hvs`), document.getElementById(`${prefix}current-hvs`),
+                    document.getElementById(`${prefix}prev-gvs`), document.getElementById(`${prefix}current-gvs`),
                 ];
             } else if (isElectricity) {
-                // Слушатели для двутарифного калькулятора энергии
                 inputs = [
-                    document.getElementById(`${prefix}prev-day`),
-                    document.getElementById(`${prefix}current-day`),
-                    document.getElementById(`${prefix}prev-night`),
-                    document.getElementById(`${prefix}current-night`),
+                    document.getElementById(`${prefix}prev-day`), document.getElementById(`${prefix}current-day`),
+                    document.getElementById(`${prefix}prev-night`), document.getElementById(`${prefix}current-night`),
                 ];
             } else if (isHeat) {
-                 // Слушатели для калькулятора тепла
                 inputs = [
-                    document.getElementById(`${prefix}prev-heating`),
-                    document.getElementById(`${prefix}current-heating`),
-                    document.getElementById(`${prefix}prev-water`),
-                    document.getElementById(`${prefix}current-water`),
+                    document.getElementById(`${prefix}prev-heating`), document.getElementById(`${prefix}current-heating`),
+                    document.getElementById(`${prefix}prev-water`), document.getElementById(`${prefix}current-water`),
                 ];
             }
             
-            // Назначаем обработчик на каждое поле, которое влияет на расчет
             inputs.forEach(input => {
-                if (input) {
-                    input.addEventListener('input', () => calculateUtilityCost(service));
-                }
+                if (input) input.addEventListener('input', () => calculateUtilityCost(service));
             });
             
-            // Выполнить первый расчет при инициализации
             calculateUtilityCost(service);
         }
 
         /** Рендеринг представления отдельной услуги (Форма + История) */
         function renderServiceView(service, readings) {
             const viewElement = document.getElementById(`${service}-view`);
-            if (!viewElement) return;
+            if (!viewElement) {
+                 console.warn(`View element not found for service: ${service}`); // Предупреждение, если элемент не найден
+                 return;
+            }
 
             const displayName = getServiceDisplayName(service);
             const metered = isMetered(service);
 
-            // Используем новую структуру с 2 колонками, где правая колонка содержит Калькулятор и Последние данные.
+            if (service === 'Configuration') {
+                viewElement.innerHTML = `
+                    <div class="max-w-6xl mx-auto">
+                        <h2 class="text-3xl font-extrabold text-gray-900 mb-6 border-b pb-2">Настройки и Управление Данными</h2>
+                        <div class="bg-yellow-50 p-6 rounded-xl shadow-lg mb-8 border-l-4 border-yellow-500">
+                            <h3 class="text-xl font-semibold text-yellow-800 mb-3">🛠 Конфигурация Firebase для GitHub Pages</h3>
+                            <p class="text-gray-700 mb-4">
+                                Если вы видите баннер "Ошибка инициализации базы данных", 
+                                вставьте ваш JSON-объект конфигурации Firebase в переменную <code class="font-mono bg-yellow-100 p-1 rounded text-sm">FIREBASE_CONFIG_MANUAL</code> 
+                                внутри тега <code class="font-mono bg-yellow-100 p-1 rounded text-sm">&lt;script&gt;</code>.
+                            </p>
+                            <pre class="bg-gray-800 text-green-300 p-3 rounded-lg overflow-x-auto text-sm mt-4 font-mono">
+const FIREBASE_CONFIG_MANUAL = {
+    apiKey: "ВАШ_API_КЛЮЧ",
+    authDomain: "ВАШ_ПРОЕКТ.firebaseapp.com",
+    projectId: "ВАШ_ID_ПРОЕКТА",
+    // ... остальные поля
+};</pre>
+                        </div>
+                        <div class="bg-white p-6 rounded-xl shadow-lg mb-8 border-l-4 border-blue-500">
+                            <h3 class="text-xl font-semibold text-gray-800 mb-3">📥 Экспорт Данных</h3>
+                            <p class="text-gray-600 mb-4">Экспортируйте все общедоступные данные (все показания счетчиков) в файл JSON для резервного копирования.</p>
+                            <button id="export-data-btn" class="bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-200 shadow-md">
+                                Скачать JSON-файл с данными
+                            </button>
+                        </div>
+                        <div class="bg-white p-6 rounded-xl shadow-lg border-l-4 border-green-500">
+                            <h3 class="text-xl font-semibold text-gray-800 mb-3">📤 Импорт Данных</h3>
+                            <p class="text-gray-600 mb-4">Загрузите ранее экспортированный JSON-файл. Это добавит новые записи в базу данных. (Не забудьте сначала сделать экспорт, если сомневаетесь!)</p>
+                            <input type="file" id="import-file-input" accept=".json" class="hidden">
+                            <div class="flex flex-col sm:flex-row gap-4 items-center">
+                                <button id="select-file-btn" class="bg-green-600 text-white p-3 rounded-lg font-semibold hover:bg-green-700 transition duration-200 shadow-md w-full sm:w-auto">
+                                    Выбрать JSON-файл
+                                </button>
+                                <button id="import-data-btn" disabled class="bg-gray-400 text-white p-3 rounded-lg font-semibold transition duration-200 shadow-md w-full sm:w-auto disabled:opacity-50">
+                                    Загрузить и Импортировать
+                                </button>
+                            </div>
+                            <p id="import-file-status" class="mt-3 text-sm text-gray-500">Файл не выбран.</p>
+                        </div>
+                    </div>
+                `;
+                setupConfigurationListeners(); 
+                return;
+            }
+
+             // Убедимся, что readings это массив для стандартных услуг
+             const safeReadings = Array.isArray(readings) ? readings : [];
+
             viewElement.innerHTML = `
                 <div class="max-w-6xl mx-auto">
                     <h2 class="text-3xl font-extrabold text-gray-900 mb-6 border-b pb-2">${displayName}</h2>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <!-- Левая колонка: Форма ввода (Факт) -->
                         ${renderForm(service)}
-                        
-                        <!-- Правая колонка: Калькулятор и Последние данные -->
                         <div class="space-y-6">
-                            ${metered ? renderCalculatorBlock(service, readings) : ''}
-                            
-                            <!-- Блок последних данных -->
+                            ${metered ? renderCalculatorBlock(service, safeReadings) : ''}
                             <div class="p-4 sm:p-6 bg-white rounded-xl shadow-lg border-t-4 ${metered ? 'border-gray-300' : 'border-blue-500'}">
-                                ${renderLatestInfoContent(service, readings)}
+                                ${renderLatestInfoContent(service, safeReadings)}
                             </div>
                         </div>
                     </div>
-                    ${renderHistoryTable(service, readings)}
+                    ${renderHistoryTable(service, safeReadings)}
                 </div>
             `;
             
-            // Повторное прикрепление слушателя к основной форме
             const form = document.getElementById(`${service}-form`);
             if (form) {
                 form.addEventListener('submit', async (e) => {
                     e.preventDefault();
+                    const readingEl = form.querySelector(`[name="reading"]`); // Более надежный поиск
+                     const costEl = form.querySelector(`[name="cost"]`);
+                     const notesEl = form.querySelector(`[name="notes"]`);
                     
-                    const readingEl = document.getElementById(`${service}-reading`);
-                    const costEl = document.getElementById(`${service}-cost`);
-                    const notesEl = document.getElementById(`${service}-notes`);
-                    
-                    // Собираем данные
-                    const reading = isMetered(service) ? parseFloat(readingEl.value) : 0;
-                    const cost = parseFloat(costEl.value);
-                    const notes = notesEl.value;
+                    // Проверка наличия элементов перед чтением value
+                    const readingValue = readingEl ? readingEl.value : '0'; 
+                    const costValue = costEl ? costEl.value : '';
+                    const notesValue = notesEl ? notesEl.value : '';
 
-                    // Проверка на числовые поля
+                    const reading = isMetered(service) ? parseFloat(readingValue) : 0;
+                    const cost = parseFloat(costValue);
+                    const notes = notesValue;
+
                     if ((isMetered(service) && isNaN(reading)) || isNaN(cost) || cost <= 0) {
-                         showMessage('Пожалуйста, введите корректные числовые значения для показаний и суммы.', 'error');
+                         showMessage('Пожалуйста, введите корректные числовые значения для показаний (если применимо) и суммы (больше 0).', 'error');
                          return;
                     }
 
                     const readingData = { reading, cost, notes };
-
                     const success = await addReading(service, readingData);
                     if (success) {
                         form.reset();
-                        // Если это услуга со счетчиком, можно предложить ввести следующее показание
-                        if(readingEl) readingEl.focus(); 
+                        if(readingEl && isMetered(service)) readingEl.focus(); 
+                        else if (costEl) costEl.focus(); // Фокус на сумме для не-счетчиков
                     }
                 });
             }
             
-            // Настройка слушателей калькулятора (только для счетчиков)
             if (metered) {
                  setupCalculatorListeners(service);
             }
@@ -961,135 +1213,105 @@
             if (!summaryElement) return;
             
             const availableYears = getAvailableYears(allData);
-            
-            // Определяем текущие фильтры, используя значения из UI, если они уже существуют
             let selectedYear = initialYear;
             let selectedMonth = initialMonth;
             
             const yearSelect = document.getElementById('summary-year');
             const monthSelect = document.getElementById('summary-month');
 
-            if (yearSelect && monthSelect) {
+            if (yearSelect && monthSelect && yearSelect.value && monthSelect.value) { // Проверка, что селекторы существуют и имеют значения
                  selectedYear = parseInt(yearSelect.value);
                  selectedMonth = parseInt(monthSelect.value);
             } else if (availableYears.length > 0) {
-                 // Устанавливаем год по умолчанию на самый новый
                  selectedYear = availableYears[0];
+                 // Устанавливаем текущий месяц по умолчанию, если селекторов еще нет
+                 selectedMonth = (typeof initialMonth === 'number') ? initialMonth : new Date().getMonth(); 
+            } else {
+                 // Если данных нет, используем текущий год/месяц
+                 selectedYear = new Date().getFullYear();
+                 selectedMonth = new Date().getMonth();
             }
 
 
-            // 1. Фильтрация данных по выбранному году и месяцу
-            let filteredReadings = {};
             let totalCost = 0;
             let costByService = {};
-
-            for (const service of serviceKeys) {
-                // ИСПРАВЛЕНИЕ: Используем оператор || [], чтобы гарантировать, что мы фильтруем массив, даже если allData[service] еще не определен (при первой загрузке).
-                filteredReadings[service] = (allData[service] || []).filter(item => {
-                    if (!item.createdAt) return false;
-                    const date = item.createdAt.toDate();
-                    // Фильтруем по году И месяцу.
-                    // Если выбран "Все месяцы" (значение -1), фильтруем только по году.
-                    const isYearMatch = date.getFullYear() === selectedYear;
-                    const isMonthMatch = selectedMonth === -1 || date.getMonth() === selectedMonth;
-                    return isYearMatch && isMonthMatch;
-                });
-                
-                // Расчет общих затрат ТОЛЬКО по отфильтрованным данным
-                const serviceTotal = filteredReadings[service].reduce((sum, item) => sum + item.cost, 0);
-                costByService[service] = serviceTotal;
-                totalCost += serviceTotal;
-            }
+            const dataServiceKeys = ['Water', 'Electricity', 'Heat', 'Garbage', 'ManagementCompany'];
             
-            // 2. Генерация селекторов Года
-            const yearOptions = availableYears.map(year => 
-                `<option value="${year}" ${year === selectedYear ? 'selected' : ''}>${year} год</option>`
-            ).join('');
+            dataServiceKeys.forEach(service => {
+                 const serviceReadings = allData[service] || []; // Гарантируем массив
+                 const filtered = serviceReadings.filter(item => {
+                     if (!item.createdAt) return false;
+                     const date = item.createdAt.toDate();
+                     const isYearMatch = date.getFullYear() === selectedYear;
+                     const isMonthMatch = selectedMonth === -1 || date.getMonth() === selectedMonth;
+                     return isYearMatch && isMonthMatch;
+                 });
+                 
+                 const serviceTotal = filtered.reduce((sum, item) => sum + (item.cost || 0), 0);
+                 costByService[service] = serviceTotal;
+                 totalCost += serviceTotal;
+             });
             
-            // 3. Генерация селекторов Месяца
+            const yearOptions = availableYears.length > 0 
+                ? availableYears.map(year => `<option value="${year}" ${year === selectedYear ? 'selected' : ''}>${year} год</option>`).join('')
+                : `<option value="${new Date().getFullYear()}">${new Date().getFullYear()} год</option>`; // Показываем текущий год, если данных нет
+            
             const monthOptions = [
-                `<option value="-1">Все месяцы</option>`,
-                ...Array.from({ length: 12 }, (_, i) => 
-                    `<option value="${i}" ${i === selectedMonth ? 'selected' : ''}>${getMonthName(i)}</option>`
-                )
+                `<option value="-1" ${selectedMonth === -1 ? 'selected' : ''}>Все месяцы</option>`,
+                ...Array.from({ length: 12 }, (_, i) => `<option value="${i}" ${i === selectedMonth ? 'selected' : ''}>${getMonthName(i)}</option>`)
             ].join('');
 
-            // 4. Рендеринг карточек услуг
-            const serviceCards = serviceKeys.map(service => {
-                const displayName = getServiceDisplayName(service);
-                // Берем последнее значение из ПОЛНОГО массива данных (для корректного отображения "Посл. оплаты")
-                const latestReading = (allData[service] || []).length > 0 ? (allData[service] || [])[0] : null; // Безопасный доступ
-                const serviceCost = costByService[service] || 0;
-                
-                return `
-                    <div class="bg-white p-6 rounded-xl shadow-lg border-l-4 border-blue-500 hover:shadow-xl transition duration-300">
-                        <h3 class="text-xl font-semibold text-gray-800 mb-2">${displayName}</h3>
-                        <p class="text-sm text-gray-500">Затраты за период:</p>
-                        <p class="text-2xl font-bold ${serviceCost > 0 ? 'text-red-600' : 'text-gray-500'} mb-3">${formatCurrency(serviceCost)}</p>
-                        
-                        ${latestReading ? `
-                            <div class="text-xs pt-3 border-t border-gray-100">
-                                <p>Посл. оплата (всего): <span class="font-medium">${formatCurrency(latestReading.cost)}</span></p>
-                                <p>Дата: ${formatDate(latestReading.createdAt)}</p>
-                            </div>
-                        ` : `
-                            <p class="text-xs text-gray-400 pt-3 border-t border-gray-100">Нет данных</p>
-                        `}
-                    </div>
-                `;
-            }).join('');
+             const serviceCards = dataServiceKeys
+                 .map(service => {
+                 const displayName = getServiceDisplayName(service);
+                 const latestReading = (allData[service] || []).length > 0 ? (allData[service] || [])[0] : null;
+                 const serviceCost = costByService[service] || 0;
+                 
+                 return `
+                     <div class="bg-white p-6 rounded-xl shadow-lg border-l-4 border-blue-500 hover:shadow-xl transition duration-300">
+                         <h3 class="text-xl font-semibold text-gray-800 mb-2">${displayName}</h3>
+                         <p class="text-sm text-gray-500">Затраты за период:</p>
+                         <p class="text-2xl font-bold ${serviceCost > 0 ? 'text-red-600' : 'text-gray-500'} mb-3">${formatCurrency(serviceCost)}</p>
+                         ${latestReading ? `
+                             <div class="text-xs pt-3 border-t border-gray-100">
+                                 <p>Посл. оплата (всего): <span class="font-medium">${formatCurrency(latestReading.cost)}</span></p>
+                                 <p>Дата: ${formatDate(latestReading.createdAt)}</p>
+                             </div>` 
+                          : `<p class="text-xs text-gray-400 pt-3 border-t border-gray-100">Нет данных</p>`}
+                     </div>`;
+             }).join('');
             
-            // 5. Обновление HTML Сводки
             summaryElement.innerHTML = `
                 <div class="max-w-6xl mx-auto">
                     <h2 class="text-3xl font-extrabold text-gray-900 mb-6">Сводка по Коммунальным Услугам</h2>
-                    
-                    <!-- Селекторы Месяца и Года -->
                     <div class="mb-8 p-4 bg-white rounded-xl shadow-md flex flex-wrap gap-4 items-center">
                         <p class="font-medium text-gray-700">Просмотр периода:</p>
-                        <select id="summary-month" class="p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 min-w-[150px]">
-                            ${monthOptions}
-                        </select>
-                        <select id="summary-year" class="p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 min-w-[120px]">
-                            ${yearOptions.length > 0 ? yearOptions : '<option value="">Нет данных</option>'}
-                        </select>
+                        <select id="summary-month" class="p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 min-w-[150px]">${monthOptions}</select>
+                        <select id="summary-year" class="p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 min-w-[120px]">${yearOptions}</select>
                     </div>
-
-                    <!-- Карточка общих расходов за период -->
                     <div class="mb-8 p-6 bg-blue-600 text-white rounded-xl shadow-2xl transform transition duration-300">
                         <p class="text-lg font-medium">Общие затраты за выбранный период:</p>
                         <p class="text-5xl font-extrabold mt-1">${formatCurrency(totalCost)}</p>
                     </div>
-
-                    <!-- Карточки по услугам за период -->
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
-                        ${serviceCards}
-                    </div>
-                    
-                    <!-- Блок аналитики -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">${serviceCards}</div>
                     <div class="mt-12 p-6 bg-gray-50 rounded-xl border border-gray-200">
                         <h3 class="text-xl font-semibold text-gray-800 mb-2">Начните работу</h3>
                         <p class="text-gray-600">Выберите вкладку выше, чтобы добавить показания счетчиков или внести платежи. Все данные будут автоматически суммированы на этом экране!</p>
                     </div>
-                </div>
-            `;
+                </div>`;
             
-            // 6. Прикрепление слушателей событий после рендеринга
+            // Перепривязываем слушатели ТОЛЬКО если селекторы действительно существуют
             const newYearSelect = document.getElementById('summary-year');
             const newMonthSelect = document.getElementById('summary-month');
 
             if (newYearSelect) {
                 newYearSelect.addEventListener('change', () => {
-                    const year = parseInt(newYearSelect.value);
-                    const month = parseInt(newMonthSelect.value);
-                    renderSummaryView(allData, year, month);
+                    renderSummaryView(allData, parseInt(newYearSelect.value), parseInt(newMonthSelect?.value || new Date().getMonth()));
                 });
             }
             if (newMonthSelect) {
                 newMonthSelect.addEventListener('change', () => {
-                    const year = parseInt(newYearSelect.value);
-                    const month = parseInt(newMonthSelect.value);
-                    renderSummaryView(allData, year, month);
+                     renderSummaryView(allData, parseInt(newYearSelect?.value || new Date().getFullYear()), parseInt(newMonthSelect.value));
                 });
             }
         }
@@ -1098,66 +1320,64 @@
 
         let currentView = 'Summary';
 
-        /** Переключает видимость представлений */
         function switchView(viewName) {
-            if (currentView === viewName) return;
+            if (currentView === viewName && document.getElementById(`${viewName}-view`)?.classList.contains('hidden') === false) {
+                 // Если представление уже активно, ничего не делаем
+                 return; 
+            }
 
-            // Скрыть все представления
             document.querySelectorAll('.view-content').forEach(el => el.classList.add('hidden'));
-            
-            // Показать целевое представление
             const targetView = document.getElementById(`${viewName}-view`);
+            
             if (targetView) {
                 targetView.classList.remove('hidden');
                 currentView = viewName;
+                // Ререндерим представление Настроек каждый раз при переключении на него, чтобы обновить слушатели
+                if (viewName === 'Configuration') {
+                    renderServiceView('Configuration', []); 
+                } 
+                // Можно добавить ререндер и для других вкладок, если нужно обновлять данные при каждом переключении
+                // else if (allReadings[viewName]) { // Проверяем, есть ли данные для этой вкладки
+                //     renderServiceView(viewName, allReadings[viewName]);
+                // }
+            } else {
+                 console.error(`Target view not found: ${viewName}-view`); // Ошибка, если контейнер не найден
             }
 
-            // Обновление активного состояния в навигации
-            document.querySelectorAll('.nav-item a').forEach(a => {
-                a.classList.remove('current-view');
-            });
-
+            document.querySelectorAll('.nav-item a').forEach(a => a.classList.remove('current-view'));
             const activeLink = document.querySelector(`.nav-item a[data-view="${viewName}"]`);
-            if (activeLink) {
-                activeLink.classList.add('current-view');
-            }
+            if (activeLink) activeLink.classList.add('current-view');
             
-            // Закрыть мобильное меню после выбора
             const navMenu = document.getElementById('nav-menu');
-            if (!navMenu.classList.contains('hidden-mobile')) {
+            if (navMenu && !navMenu.classList.contains('hidden-mobile')) {
                  navMenu.classList.add('hidden-mobile');
             }
         }
         
-        /** Инициализация приложения при загрузке страницы */
         window.onload = function() {
-            // 1. Инициализация Firebase и Аутентификации
-            initializeFirebase();
+            initializeFirebase(); // Инициализация Firebase происходит здесь
 
-            // 2. Настройка слушателей для навигации
+             // Слушатели навигации и меню настраиваются сразу
             document.querySelectorAll('.nav-item a').forEach(link => {
                 link.addEventListener('click', (e) => {
                     e.preventDefault();
                     const viewName = e.target.getAttribute('data-view');
-                    if (viewName) {
-                        switchView(viewName);
-                    }
+                    if (viewName) switchView(viewName);
                 });
             });
-
-            // 3. Переключатель мобильного меню
             document.getElementById('menu-toggle').addEventListener('click', () => {
                 document.getElementById('nav-menu').classList.toggle('hidden-mobile');
             });
             
-            // 4. Установка начального представления с текущим годом и месяцем
-            const defaultYear = new Date().getFullYear();
-            const defaultMonth = new Date().getMonth(); // 0-11
-            
-            // Сначала рендерим пустую сводку для установки селекторов
-            renderSummaryView(allReadings, defaultYear, defaultMonth);
-            switchView(currentView);
+            // Первичный рендеринг сводки и установка вида происходят ПОСЛЕ успешной авторизации 
+            // (перенесено в onAuthStateChanged) ИЛИ если произошла ошибка
+            // Но мы можем показать начальное состояние интерфейса сразу
+             const defaultYear = new Date().getFullYear();
+             const defaultMonth = new Date().getMonth();
+             renderSummaryView({}, defaultYear, defaultMonth); // Рендерим пустую сводку
+             switchView(currentView); // Показываем сводку по умолчанию
         };
     </script>
 </body>
 </html>
+
