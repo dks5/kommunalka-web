@@ -31,6 +31,10 @@
             background-color: #1e40af; /* Blue-800 */
             border-bottom-color: #dbeafe; /* Blue-100 */
         }
+         /* ИЗМЕНЕНИЕ v5: Стили для кнопок действий в таблице */
+        .history-table-body tr:hover .action-btn {
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -57,6 +61,10 @@
                     <!-- Элементы навигации. data-view используется для переключения контента. -->
                     <li class="nav-item">
                         <a href="#" data-view="Summary" class="block p-4 sm:px-6 hover:bg-blue-800 transition duration-150 border-b-2 border-blue-700 sm:border-b-0 current-view">Сводка</a>
+                    </li>
+                    <!-- ИЗМЕНЕНИЕ v3: НОВАЯ ВКЛАДКА: Счетчики -->
+                    <li class="nav-item">
+                        <a href="#" data-view="Meters" class="block p-4 sm:px-6 hover:bg-blue-800 transition duration-150 border-b-2 border-blue-700 sm:border-b-0">Счетчики</a>
                     </li>
                     <li class="nav-item">
                         <a href="#" data-view="Water" class="block p-4 sm:px-6 hover:bg-blue-800 transition duration-150 border-b-2 border-blue-700 sm:border-b-0">Вода</a>
@@ -96,6 +104,8 @@
                 <div id="Summary-view" class="view-content"></div>
                 
                 <!-- Остальные представления скрыты по умолчанию -->
+                <!-- ИЗМЕНЕНИЕ v3: НОВЫЙ КОНТЕЙНЕР ДЛЯ СЧЕТЧИКОВ -->
+                <div id="Meters-view" class="view-content hidden"></div>
                 <div id="Water-view" class="view-content hidden"></div>
                 <div id="Electricity-view" class="view-content hidden"></div>
                 <div id="Heat-view" class="view-content hidden"></div>
@@ -121,8 +131,8 @@
         // Импорты Firebase SDK
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        // Добавлен getDocs для экспорта
-        import { getFirestore, doc, collection, query, onSnapshot, orderBy, where, addDoc, serverTimestamp, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // ИЗМЕНЕНИЕ v5: Добавлены 'updateDoc', 'deleteDoc'
+        import { getFirestore, doc, collection, query, onSnapshot, orderBy, where, addDoc, serverTimestamp, getDocs, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Глобальные переменные Canvas среды для Firebase
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
@@ -156,6 +166,8 @@
         let auth;
         let isAuthReady = false;
         let allReadings = {}; // Мастер-объект для хранения всех данных
+        // ИЗМЕНЕНИЕ v5: ID записи, которая редактируется
+        let currentEditingId = null; 
 
         // --- Вспомогательные функции ---
 
@@ -354,11 +366,147 @@
                 return false;
             }
         }
+
+        /** ИЗМЕНЕНИЕ v5: Обновляет существующую запись в Firestore */
+        async function updateReading(docId, service, readingData) {
+            if (!isAuthReady) {
+                showMessage('Подождите, идет авторизация или произошла ошибка.', 'error');
+                return false;
+            }
+            if (!docId) {
+                 showMessage('Ошибка: Не найден ID записи для обновления.', 'error');
+                 return false;
+            }
+            try {
+                const docRef = doc(db, getCollectionPath(), docId);
+                
+                const dataToUpdate = {
+                    reading: parseFloat(readingData.reading || 0), 
+                    cost: parseFloat(readingData.cost),
+                    notes: readingData.notes || '',
+                    billingMonth: parseInt(readingData.billingMonth),
+                    billingYear: parseInt(readingData.billingYear),
+                    // createdAt не обновляем, он остается датой *создания*
+                };
+
+                await updateDoc(docRef, dataToUpdate);
+                showMessage(`Данные по ${getServiceDisplayName(service)} успешно обновлены!`);
+                return true;
+            } catch (error) {
+                console.error("Error updating document: ", error);
+                showMessage('Ошибка при обновлении данных. Проверьте консоль.', 'error');
+                return false;
+            }
+        }
+
+        /** ИЗМЕНЕНИЕ v5: Удаляет запись из Firestore */
+        async function deleteReading(docId, service) {
+             if (!isAuthReady) {
+                showMessage('Подождите, идет авторизация или произошла ошибка.', 'error');
+                return;
+            }
+             if (!docId) {
+                 showMessage('Ошибка: Не найден ID записи для удаления.', 'error');
+                 return;
+            }
+            
+            // Используем prompt для подтверждения удаления (так как window.confirm не работает в iframe)
+            const confirmation = prompt(`Вы уверены, что хотите удалить эту запись по ${getServiceDisplayName(service)}? Введите 'ДА' для подтверждения.`);
+            if (confirmation !== 'ДА') {
+                showMessage('Удаление отменено.');
+                return;
+            }
+
+            try {
+                 const docRef = doc(db, getCollectionPath(), docId);
+                 await deleteDoc(docRef);
+                 showMessage(`Запись по ${getServiceDisplayName(service)} успешно удалена.`);
+            } catch (error) {
+                 console.error("Error deleting document: ", error);
+                 showMessage('Ошибка при удалении данных. Проверьте консоль.', 'error');
+            }
+        }
+
+        /** ИЗМЕНЕНИЕ v5: Заполняет форму данными для редактирования */
+        function populateFormForEdit(service, recordId) {
+             const readings = allReadings[service] || [];
+             const record = readings.find(r => r.id === recordId);
+             if (!record) {
+                 showMessage('Не удалось найти запись для редактирования.', 'error');
+                 return;
+             }
+
+             const form = document.getElementById(`${service}-form`);
+             if (!form) return;
+
+             // Заполняем поля формы
+             const readingEl = form.querySelector(`[name="reading"]`);
+             const costEl = form.querySelector(`[name="cost"]`);
+             const notesEl = form.querySelector(`[name="notes"]`);
+             const monthEl = form.querySelector(`[name="billingMonth"]`);
+             const yearEl = form.querySelector(`[name="billingYear"]`);
+             
+             if (readingEl && isMetered(service)) readingEl.value = record.reading || '';
+             if (costEl) costEl.value = record.cost || '';
+             if (notesEl) notesEl.value = record.notes || '';
+             if (monthEl) monthEl.value = record.billingMonth; // Месяц хранится как число 0-11
+             if (yearEl) yearEl.value = record.billingYear;
+
+             currentEditingId = recordId; // Устанавливаем ID редактируемой записи
+             
+             // Меняем текст кнопки и заголовок формы
+             form.querySelector('h3').textContent = 'Редактировать данные';
+             const submitButton = form.querySelector('button[type="submit"]');
+             submitButton.textContent = 'Сохранить изменения';
+             submitButton.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+             submitButton.classList.add('bg-green-600', 'hover:bg-green-700');
+
+             // Добавляем кнопку "Отмена"
+             let cancelButton = form.querySelector('.cancel-edit-btn');
+             if (!cancelButton) {
+                 cancelButton = document.createElement('button');
+                 cancelButton.type = 'button'; // Важно, чтобы не отправлять форму
+                 cancelButton.textContent = 'Отмена';
+                 cancelButton.classList.add('cancel-edit-btn', 'w-full', 'bg-gray-400', 'text-white', 'p-3', 'rounded-lg', 'font-semibold', 'hover:bg-gray-500', 'transition', 'duration-200', 'shadow-md', 'mt-3');
+                 cancelButton.addEventListener('click', () => resetForm(service));
+                 submitButton.insertAdjacentElement('afterend', cancelButton);
+             }
+             
+             // Прокрутка к форме
+              form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        /** ИЗМЕНЕНИЕ v5: Сбрасывает форму в режим добавления */
+        function resetForm(service) {
+             const form = document.getElementById(`${service}-form`);
+             if (!form) return;
+
+             form.reset();
+             currentEditingId = null;
+
+             // Восстанавливаем селекторы периода на текущие значения
+             const monthEl = form.querySelector(`[name="billingMonth"]`);
+             const yearEl = form.querySelector(`[name="billingYear"]`);
+             if (monthEl) monthEl.value = new Date().getMonth();
+             if (yearEl) yearEl.value = new Date().getFullYear();
+
+             // Восстанавливаем текст кнопки и заголовок
+             form.querySelector('h3').textContent = 'Добавить новые данные (Факт)';
+             const submitButton = form.querySelector('button[type="submit"]');
+             submitButton.textContent = `Сохранить данные по ${getServiceDisplayName(service)}`;
+             submitButton.classList.remove('bg-green-600', 'hover:bg-green-700');
+             submitButton.classList.add('bg-blue-600', 'hover:bg-blue-700');
+
+             // Удаляем кнопку "Отмена", если она есть
+             const cancelButton = form.querySelector('.cancel-edit-btn');
+             if (cancelButton) cancelButton.remove();
+        }
+
         
         // --- Реагирование на изменения данных в реальном времени ---
         
-        // ИЗМЕНЕНИЕ v2: Добавлена 'Rent'
-        const serviceKeys = ['Water', 'Electricity', 'Heat', 'Garbage', 'ManagementCompany', 'Rent', 'Configuration']; 
+        // ИЗМЕНЕНИЕ v3: Добавлен 'Meters'
+        const serviceKeys = ['Water', 'Electricity', 'Heat', 'Garbage', 'ManagementCompany', 'Rent', 'Meters', 'Configuration']; 
         
         /** Настраивает onSnapshot для получения всех данных в реальном времени */
         function setupRealtimeListeners() {
@@ -412,7 +560,14 @@
                 const currentMonth = parseInt(document.getElementById('summary-month')?.value || new Date().getMonth());
                 
                 renderSummaryView(allReadings, currentYear, currentMonth);
-                serviceKeys.filter(s => s !== 'Configuration').forEach(service => {
+                
+                // ИЗМЕНЕНИЕ v3: Обновляем вкладку Счетчики, если она активна
+                if (currentView === 'Meters') {
+                    renderMetersView(allReadings);
+                }
+
+                // Обновляем остальные вкладки (кроме Meters и Configuration)
+                serviceKeys.filter(s => s !== 'Configuration' && s !== 'Meters').forEach(service => {
                     // Проверяем, существует ли ключ в newReadings перед передачей
                     renderServiceView(service, newReadings[service] || []) 
                 });
@@ -683,6 +838,7 @@
                 'Garbage': 'ПЭО',
                 'ManagementCompany': 'УК "ВЛ"',
                 'Rent': 'Аренда', // ИЗМЕНЕНИЕ v2: НОВАЯ ЗАПИСЬ
+                'Meters': 'Счетчики', // ИЗМЕНЕНИЕ v3: НОВАЯ ЗАПИСЬ
                 'Summary': 'Сводка',
                 'Configuration': 'Настройки' 
             };
@@ -747,6 +903,79 @@
             `;
         }
 
+        /** ИЗМЕНЕНИЕ v4: Переделана функция для вкладки "Счетчики" */
+        function renderMetersView(allData) {
+            const viewElement = document.getElementById('Meters-view');
+            if (!viewElement) return;
+
+            const meterServices = ['Water', 'Electricity', 'Heat'];
+            let tablesHtml = '';
+
+            meterServices.forEach(service => {
+                const readings = allData[service] || [];
+                let precision = 2;
+                let unit = '';
+                if (service === 'Water') unit = 'м³';
+                else if (service === 'Electricity') unit = 'кВтч';
+                else if (service === 'Heat') {
+                    unit = 'Гкал';
+                    precision = 6;
+                }
+
+                const tableRows = readings.map((r, index) => {
+                    const previousReadingValue = (index < readings.length - 1) ? readings[index + 1].reading : null;
+                    const consumption = (previousReadingValue !== null && typeof r.reading === 'number') 
+                                        ? r.reading - previousReadingValue 
+                                        : null;
+                    const period = formatPeriod(r.billingMonth, r.billingYear);
+                    const createdAt = r.createdAt ? formatDate(r.createdAt) : 'N/A';
+
+                    return `
+                        <tr class="border-b hover:bg-gray-50 transition duration-100">
+                            <td class="px-2 py-3 sm:p-3 text-sm font-medium text-gray-900">${period}</td>
+                            <td class="px-2 py-3 sm:p-3 text-sm">${typeof r.reading === 'number' ? r.reading.toFixed(precision) : 'N/A'}</td>
+                            <td class="px-2 py-3 sm:p-3 text-sm font-semibold text-blue-600">${consumption !== null ? consumption.toFixed(precision) : '-'}</td>
+                            <td class="px-2 py-3 sm:p-3 text-xs text-gray-400">${createdAt}</td>
+                        </tr>
+                    `;
+                }).join('');
+
+                tablesHtml += `
+                    <div class="bg-white p-4 sm:p-6 rounded-xl shadow-lg mb-6">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-4">${getServiceDisplayName(service)} (${unit})</h3>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-2 py-3 sm:p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Период</th>
+                                        <th class="px-2 py-3 sm:p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Показание</th>
+                                        <th class="px-2 py-3 sm:p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Расход (Разница)</th>
+                                        <th class="px-2 py-3 sm:p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Дата внесения</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">
+                                    ${tableRows.length > 0 ? tableRows : `<tr><td colspan="4" class="text-center p-4 text-gray-500">Нет данных. Добавьте показания на вкладке "${getServiceDisplayName(service)}".</td></tr>`}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            });
+
+
+            viewElement.innerHTML = `
+                <div class="max-w-6xl mx-auto">
+                    <h2 class="text-3xl font-extrabold text-gray-900 mb-6 border-b pb-2">Статистика по Счетчикам</h2>
+                    <p class="text-sm text-gray-600 mb-6">
+                        Здесь собрана история показаний и расхода для каждой услуги со счетчиком. 
+                        Расход (Разница) рассчитывается на основе предыдущего внесенного показания для этой услуги. 
+                        Ввод данных по-прежнему происходит на отдельных вкладках ("Вода", "Эл. энергия", "Тепло").
+                    </p>
+                    ${tablesHtml} 
+                </div>
+            `;
+        }
+
 
         function renderHistoryTable(service, readings) {
              if (service === 'Configuration' || !readings) return '';
@@ -777,14 +1006,28 @@
                 // ИЗМЕНЕНО: Используем formatPeriod
                 const period = formatPeriod(r.billingMonth, r.billingYear);
 
+                // ИЗМЕНЕНИЕ v5: Добавляем кнопки Редактировать/Удалить
                 return `
-                    <tr class="border-b hover:bg-gray-50 transition duration-100">
+                    <tr class="border-b hover:bg-gray-50 transition duration-100 group">
                         <td class="px-2 py-3 sm:p-3 text-sm font-medium text-gray-900">${period}</td>
                         ${metered ? `<td class="px-2 py-3 sm:p-3 text-sm">${typeof r.reading === 'number' ? r.reading.toFixed(readingPrecision) : 'N/A'}</td>` : ''}
                         ${metered ? `<td class="px-2 py-3 sm:p-3 text-sm text-blue-600">${consumption !== null ? consumption.toFixed(consumptionPrecision) : '-'}</td>` : ''}
                         <td class="px-2 py-3 sm:p-3 text-sm font-semibold">${formatCurrency(r.cost)}</td>
-                        <td class="px-2 py-3 sm:p-3 text-xs text-gray-500 max-w-xs truncate">${r.notes || '-'}</td>
+                        <td class="px-2 py-3 sm:p-3 text-xs text-gray-500 max-w-[150px] sm:max-w-xs truncate" title="${r.notes || ''}">${r.notes || '-'}</td>
                         <td class="px-2 py-3 sm:p-3 text-xs text-gray-400">${r.createdAt ? formatDate(r.createdAt) : 'N/A'}</td>
+                        <!-- Кнопки действий -->
+                        <td class="px-2 py-3 sm:p-3 text-right text-xs whitespace-nowrap">
+                             <button class="action-btn edit-btn text-blue-600 hover:text-blue-800 font-medium mr-2 opacity-0 group-hover:opacity-100 transition-opacity" data-id="${r.id}" data-service="${service}">
+                                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 inline-block pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                 </svg>
+                             </button>
+                             <button class="action-btn delete-btn text-red-600 hover:text-red-800 font-medium opacity-0 group-hover:opacity-100 transition-opacity" data-id="${r.id}" data-service="${service}">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 inline-block pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                             </button>
+                        </td>
                     </tr>
                 `;
             }).join('');
@@ -802,10 +1045,12 @@
                                     <th class="px-2 py-3 sm:p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Стоимость</th>
                                     <th class="px-2 py-3 sm:p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Примечания</th>
                                     <th class="px-2 py-3 sm:p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Дата внесения</th>
+                                    <th class="px-2 py-3 sm:p-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Действия</th> 
                                 </tr>
                             </thead>
-                            <tbody class="bg-white divide-y divide-gray-200">
-                                ${tableRows.length > 0 ? tableRows : `<tr><td colspan="${metered ? 6 : 4}" class="text-center p-4 text-gray-500">Нет данных. Добавьте первую запись!</td></tr>`}
+                            <!-- ИЗМЕНЕНИЕ v5: Добавлен ID для делегирования событий -->
+                            <tbody class="bg-white divide-y divide-gray-200 history-table-body" id="history-table-${service}">
+                                ${tableRows.length > 0 ? tableRows : `<tr><td colspan="${metered ? 7 : 5}" class="text-center p-4 text-gray-500">Нет данных. Добавьте первую запись!</td></tr>`}
                             </tbody>
                         </table>
                     </div>
@@ -849,6 +1094,7 @@
 
             return `
                 <form id="${service}-form" class="bg-white p-4 sm:p-6 rounded-xl shadow-lg border-t-4 border-blue-500">
+                    <!-- ИЗМЕНЕНИЕ v5: Заголовок может меняться -->
                     <h3 class="text-xl font-semibold mb-4 text-gray-800">Добавить новые данные (Факт)</h3>
                     
                     <!-- НОВЫЙ БЛОК: Выбор периода -->
@@ -892,9 +1138,11 @@
                             class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150 shadow-sm" placeholder="Комментарий к платежу или тариф"></textarea>
                     </div>
 
+                    <!-- ИЗМЕНЕНИЕ v5: Кнопка может меняться -->
                     <button type="submit" class="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-200 shadow-md transform hover:scale-[1.01] active:scale-[0.99]">
                         Сохранить данные по ${displayName}
                     </button>
+                    <!-- Кнопка "Отмена" будет добавлена сюда динамически -->
                 </form>
             `;
         }
@@ -950,6 +1198,7 @@
             `;
         }
         
+        // ИЗМЕНЕНИЕ v6: Упрощение калькулятора Электроэнергии
         function renderCalculatorBlock(service, readings) {
              if (service === 'Configuration') return '';
             if (!isMetered(service)) return '';
@@ -966,7 +1215,6 @@
             
             const prefix = `${service}-calc-`;
             
-            // ... (остальной код renderCalculatorBlock без изменений, но теперь использует latestReadingValue) ...
             if (isWater) {
                 const latestReadingHVS = latestReadingValue; 
                 return `
@@ -1035,69 +1283,44 @@
                     </div>
                 `;
             } else if (isElectricity) {
+                // ИЗМЕНЕНИЕ v6: Упрощено для одного тарифа
                 return `
                     <div id="${service}-calculator" class="bg-white p-4 sm:p-6 rounded-xl shadow-lg border-t-4 border-purple-500">
                         <h3 class="text-xl font-semibold mb-4 text-gray-800 flex items-center">Калькулятор тарифов (Энергия)</h3>
-                        <div class="mb-5 p-3 bg-purple-50 rounded-lg border border-purple-200 text-sm grid grid-cols-2 gap-3">
-                            <div>
-                                <p class="font-semibold text-gray-700">Тариф ДЕНЬ (кВтч):</p>
-                                <p class="text-base font-bold text-red-600">5.72 руб.</p>
-                                <input type="hidden" id="Electricity-calc-tariff-day" value="5.72">
-                            </div>
-                            <div>
-                                <p class="font-semibold text-gray-700">Тариф НОЧЬ (кВтч):</p>
-                                <p class="text-base font-bold text-red-600">2.39 руб.</p>
-                                <input type="hidden" id="Electricity-calc-tariff-night" value="2.39">
-                            </div>
+                        <div class="mb-5 p-3 bg-purple-50 rounded-lg border border-purple-200 text-sm">
+                            <p class="font-semibold text-gray-700">Тариф (кВтч):</p>
+                            <p class="text-base font-bold text-red-600">4.58 руб.</p>
+                            <input type="hidden" id="Electricity-calc-tariff-single" value="4.58">
                         </div>
                         <div class="space-y-4">
                             <div class="p-3 border rounded-lg border-gray-200">
-                                <p class="font-semibold mb-2 text-yellow-700">1. ДЕНЬ (кВтч)</p>
+                                <p class="font-semibold mb-2 text-yellow-700">Показания (кВтч)</p>
                                 <div class="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label for="Electricity-calc-prev-day" class="block text-xs font-medium text-gray-700 mb-1">Предыдущее пок.</label>
-                                        <input type="number" step="0.01" id="Electricity-calc-prev-day" 
+                                        <label for="Electricity-calc-prev" class="block text-xs font-medium text-gray-700 mb-1">Предыдущее пок.</label>
+                                        <input type="number" step="0.01" id="Electricity-calc-prev" 
                                             class="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 focus:bg-white transition duration-150" 
-                                            value="0.00" placeholder="0.00">
+                                            value="${latestReadingValue.toFixed(2)}" placeholder="0.00">
                                     </div>
                                     <div>
-                                        <label for="Electricity-calc-current-day" class="block text-xs font-medium text-gray-700 mb-1">Текущее пок.</label>
-                                        <input type="number" step="0.01" id="Electricity-calc-current-day" 
+                                        <label for="Electricity-calc-current" class="block text-xs font-medium text-gray-700 mb-1">Текущее пок.</label>
+                                        <input type="number" step="0.01" id="Electricity-calc-current" 
                                             class="w-full p-2 border border-blue-400 rounded-lg focus:ring-blue-500 transition duration-150" 
                                             value="" placeholder="0.00">
                                     </div>
                                 </div>
-                                <p id="Electricity-calc-consumption-day" class="mt-2 text-sm font-medium text-gray-600">Расход: 0.00 кВтч</p>
-                            </div>
-                            <div class="p-3 border rounded-lg border-gray-200">
-                                <p class="font-semibold mb-2 text-indigo-700">2. НОЧЬ (кВтч)</p>
-                                <div class="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label for="Electricity-calc-prev-night" class="block text-xs font-medium text-gray-700 mb-1">Предыдущее пок.</label>
-                                        <input type="number" step="0.01" id="Electricity-calc-prev-night" 
-                                            class="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 focus:bg-white transition duration-150" 
-                                            value="0.00" placeholder="0.00">
-                                    </div>
-                                    <div>
-                                        <label for="Electricity-calc-current-night" class="block text-xs font-medium text-gray-700 mb-1">Текущее пок.</label>
-                                        <input type="number" step="0.01" id="Electricity-calc-current-night" 
-                                            class="w-full p-2 border border-blue-400 rounded-lg focus:ring-blue-500 transition duration-150" 
-                                            value="" placeholder="0.00">
-                                    </div>
-                                </div>
-                                <p id="Electricity-calc-consumption-night" class="mt-2 text-sm font-medium text-gray-600">Расход: 0.00 кВтч</p>
+                                <p id="Electricity-calc-consumption" class="mt-2 text-sm font-medium text-gray-600">Расход: 0.00 кВтч</p>
                             </div>
                         </div>
                         <div class="mt-6 p-4 bg-purple-100 rounded-lg border-2 border-purple-300">
-                            <p class="text-sm font-semibold text-purple-800">Общий расход: <span id="Electricity-calc-total-consumption" class="font-extrabold">0.00 кВтч</span></p>
                             <p class="text-sm font-semibold text-purple-800 mt-2">Расчетная сумма к оплате:</p>
                             <p id="Electricity-calc-total-cost" class="text-3xl font-extrabold text-purple-900 mt-1">0.00 ₽</p>
-                            <p class="text-xs mt-2 text-purple-700">Расчет: (Расход День * 5.72) + (Расход Ночь * 2.39)</p>
+                            <p class="text-xs mt-2 text-purple-700">Расчет: Расход * 4.58</p>
                         </div>
                     </div>
                 `;
             } else if (isHeat) {
-                // ЭТОТ БЛОК НЕ ИЗМЕНЯЛСЯ (ОШИБКА БЫЛА ИСПРАВЛЕНА В v1)
+                // Этот блок остался без изменений
                 const latestReadingHeat = latestReadingValue; 
                 return `
                     <div id="${service}-calculator" class="bg-white p-4 sm:p-6 rounded-xl shadow-lg border-t-4 border-purple-500">
@@ -1158,6 +1381,7 @@
             }
         }
         
+        // ИЗМЕНЕНИЕ v6: Упрощение расчета Электроэнергии
         function calculateUtilityCost(service) {
              if (service === 'Configuration') return;
 
@@ -1189,28 +1413,20 @@
             }
             
             if (isElectricity) {
-                const tariffDay = parseFloat(document.getElementById(`${prefix}tariff-day`)?.value) || 5.72;
-                const tariffNight = parseFloat(document.getElementById(`${prefix}tariff-night`)?.value) || 2.39;
-                const prevDay = parseFloat(document.getElementById(`${prefix}prev-day`)?.value) || 0;
-                const currentDay = parseFloat(document.getElementById(`${prefix}current-day`)?.value) || 0;
-                const prevNight = parseFloat(document.getElementById(`${prefix}prev-night`)?.value) || 0;
-                const currentNight = parseFloat(document.getElementById(`${prefix}current-night`)?.value) || 0;
-                const consumptionDay = (currentDay >= prevDay) ? currentDay - prevDay : 0;
-                const consumptionNight = (currentNight >= prevNight) ? currentNight - prevNight : 0;
-                const totalConsumption = consumptionDay + consumptionNight;
-                const costDay = consumptionDay * tariffDay;
-                const costNight = consumptionNight * tariffNight;
-                const totalCost = costDay + costNight;
+                // ИЗМЕНЕНИЕ v6: Один тариф
+                const tariffSingle = parseFloat(document.getElementById(`${prefix}tariff-single`)?.value) || 4.58;
+                const prev = parseFloat(document.getElementById(`${prefix}prev`)?.value) || 0;
+                const current = parseFloat(document.getElementById(`${prefix}current`)?.value) || 0;
+                const consumption = (current >= prev) ? current - prev : 0;
+                const totalCost = consumption * tariffSingle;
                 const unit = 'кВтч';
-                document.getElementById(`${prefix}consumption-day`).textContent = `Расход: ${consumptionDay.toFixed(2)} ${unit}`;
-                document.getElementById(`${prefix}consumption-night`).textContent = `Расход: ${consumptionNight.toFixed(2)} ${unit}`;
-                document.getElementById(`${prefix}total-consumption`).textContent = `${totalConsumption.toFixed(2)} ${unit}`;
+                document.getElementById(`${prefix}consumption`).textContent = `Расход: ${consumption.toFixed(2)} ${unit}`;
                 document.getElementById(`${prefix}total-cost`).textContent = formatCurrency(totalCost);
                 return;
             } 
             
             if (isHeat) {
-                // ЭТОТ БЛОК НЕ ИЗМЕНЯЛСЯ (ОШИБКА БЫЛА ИСПРАВЛЕНА В v1)
+                // Этот блок остался без изменений
                 const tariffGcal = parseFloat(document.getElementById(`${prefix}tariff-gcal`)?.value) || 3134.17;
                 const prevHeating = parseFloat(document.getElementById(`${prefix}prev-heating`)?.value) || 0;
                 const currentHeating = parseFloat(document.getElementById(`${prefix}current-heating`)?.value) || 0;
@@ -1229,6 +1445,7 @@
             }
         }
         
+        // ИЗМЕНЕНИЕ v6: Обновление слушателей Электроэнергии
         function setupCalculatorListeners(service) {
              if (service === 'Configuration') return;
 
@@ -1244,9 +1461,9 @@
                     document.getElementById(`${prefix}prev-gvs`), document.getElementById(`${prefix}current-gvs`),
                 ];
             } else if (isElectricity) {
+                // ИЗМЕНЕНИЕ v6: Только два инпута
                 inputs = [
-                    document.getElementById(`${prefix}prev-day`), document.getElementById(`${prefix}current-day`),
-                    document.getElementById(`${prefix}prev-night`), document.getElementById(`${prefix}current-night`),
+                    document.getElementById(`${prefix}prev`), document.getElementById(`${prefix}current`),
                 ];
             } else if (isHeat) {
                 inputs = [
@@ -1259,11 +1476,17 @@
                 if (input) input.addEventListener('input', () => calculateUtilityCost(service));
             });
             
+            // Вызываем расчет при инициализации
             calculateUtilityCost(service);
         }
 
         /** Рендеринг представления отдельной услуги (Форма + История) */
         function renderServiceView(service, readings) {
+            // ИЗМЕНЕНИЕ v3: Эта функция больше не рендерит 'Meters'
+            if (service === 'Meters') {
+                return; 
+            }
+            
             const viewElement = document.getElementById(`${service}-view`);
             if (!viewElement) {
                  console.warn(`View element not found for service: ${service}`); // Предупреждение, если элемент не найден
@@ -1349,50 +1572,76 @@ const FIREBASE_CONFIG_MANUAL = {
                 </div>
             `;
             
+            // ИЗМЕНЕНИЕ v5: Логика обработки формы (добавление/обновление)
             const form = document.getElementById(`${service}-form`);
             if (form) {
                 form.addEventListener('submit', async (e) => {
                     e.preventDefault();
-                    const readingEl = form.querySelector(`[name="reading"]`);
+                    
+                    // Собираем данные формы
+                     const readingEl = form.querySelector(`[name="reading"]`);
                      const costEl = form.querySelector(`[name="cost"]`);
                      const notesEl = form.querySelector(`[name="notes"]`);
-                     // НОВЫЕ ПОЛЯ
                      const monthEl = form.querySelector(`[name="billingMonth"]`);
                      const yearEl = form.querySelector(`[name="billingYear"]`);
-                    
                     
                     const readingValue = readingEl ? readingEl.value : '0'; 
                     const costValue = costEl ? costEl.value : '';
                     const notesValue = notesEl ? notesEl.value : '';
-                    // НОВЫЕ ЗНАЧЕНИЯ
                     const monthValue = monthEl ? monthEl.value : '';
                     const yearValue = yearEl ? yearEl.value : '';
-
 
                     const reading = isMetered(service) ? parseFloat(readingValue) : 0;
                     const cost = parseFloat(costValue);
                     const notes = notesValue;
-                    // НОВЫЕ ПЕРЕМЕННЫЕ
                     const billingMonth = parseInt(monthValue);
                     const billingYear = parseInt(yearValue);
 
-
-                    if ((isMetered(service) && isNaN(reading)) || isNaN(cost) || cost <= 0 || isNaN(billingMonth) || isNaN(billingYear)) {
+                    // Валидация
+                     if ((isMetered(service) && isNaN(reading)) || isNaN(cost) || cost <= 0 || isNaN(billingMonth) || isNaN(billingYear)) {
                          showMessage('Пожалуйста, введите корректные числовые значения для показаний (если применимо), суммы (больше 0) и выберите период.', 'error');
                          return;
+                     }
+
+                    const readingData = { reading, cost, notes, billingMonth, billingYear }; 
+                    
+                    let success = false;
+                    if (currentEditingId) {
+                         // Режим обновления
+                         success = await updateReading(currentEditingId, service, readingData);
+                    } else {
+                         // Режим добавления
+                         success = await addReading(service, readingData);
                     }
-
-                    const readingData = { reading, cost, notes, billingMonth, billingYear }; // Добавлен период
-                    const success = await addReading(service, readingData);
+                    
                     if (success) {
-                        form.reset();
-                        
-                        // Сбрасываем селекторы периода на текущие значения
-                         if(monthEl) monthEl.value = new Date().getMonth();
-                         if(yearEl) yearEl.value = new Date().getFullYear();
+                         resetForm(service); // Сбрасываем форму после успеха
+                    }
+                });
+            }
+            
+            // ИЗМЕНЕНИЕ v5: Добавляем слушатели для кнопок редактирования/удаления в таблице
+            // Используем делегирование событий
+            const tableBody = viewElement.querySelector('.history-table-body');
+            if (tableBody) {
+                // Удаляем старые слушатели перед добавлением новых (на всякий случай)
+                // Клонирование - простой способ удалить все существующие слушатели
+                const newTableBody = tableBody.cloneNode(true);
+                tableBody.parentNode.replaceChild(newTableBody, tableBody);
+                
+                newTableBody.addEventListener('click', (event) => {
+                    const target = event.target.closest('button'); // Ищем ближайшую кнопку
+                    if (!target) return; // Клик не по кнопке
 
-                        if(readingEl && isMetered(service)) readingEl.focus(); 
-                        else if (costEl) costEl.focus(); // Фокус на сумме для не-счетчиков
+                    const recordId = target.dataset.id;
+                    const recordService = target.dataset.service;
+                    
+                    if (!recordId || !recordService) return; // Убедимся, что у кнопки есть данные
+
+                    if (target.classList.contains('edit-btn')) {
+                         populateFormForEdit(recordService, recordId);
+                    } else if (target.classList.contains('delete-btn')) {
+                         deleteReading(recordId, recordService);
                     }
                 });
             }
@@ -1400,6 +1649,11 @@ const FIREBASE_CONFIG_MANUAL = {
             if (metered) {
                  setupCalculatorListeners(service);
             }
+            
+            // ИЗМЕНЕНИЕ v5: Сбрасываем форму при первом рендеринге, если она была в режиме редактирования
+             if(currentEditingId && document.getElementById(`${service}-form`)) {
+                 resetForm(service);
+             }
         }
         
         /** Рендеринг представления Сводки */
@@ -1524,6 +1778,18 @@ const FIREBASE_CONFIG_MANUAL = {
                  // Если представление уже активно, ничего не делаем
                  return; 
             }
+            
+            // ИЗМЕНЕНИЕ v5: Сбрасываем форму, если уходим с вкладки, где редактировали
+            if (currentEditingId) {
+                 const currentService = currentView; // Запоминаем текущую вкладку
+                 // Проверяем, существует ли форма на этой вкладке
+                 if (document.getElementById(`${currentService}-form`)){ 
+                    resetForm(currentService);
+                 } else {
+                      currentEditingId = null; // Просто сбрасываем ID, если формы нет
+                 }
+            }
+
 
             document.querySelectorAll('.view-content').forEach(el => el.classList.add('hidden'));
             const targetView = document.getElementById(`${viewName}-view`);
@@ -1531,14 +1797,14 @@ const FIREBASE_CONFIG_MANUAL = {
             if (targetView) {
                 targetView.classList.remove('hidden');
                 currentView = viewName;
-                // Ререндерим представление Настроек каждый раз при переключении на него, чтобы обновить слушатели
+
+                // ИЗМЕНЕНИЕ v3: Специальная логика рендеринга для Meters
                 if (viewName === 'Configuration') {
                     renderServiceView('Configuration', []); 
+                } else if (viewName === 'Meters') {
+                    renderMetersView(allReadings); // Рендерим сводку счетчиков
                 } 
-                // Можно добавить ререндер и для других вкладок, если нужно обновлять данные при каждом переключении
-                // else if (allReadings[viewName]) { // Проверяем, есть ли данные для этой вкладки
-                //     renderServiceView(viewName, allReadings[viewName]);
-                // }
+                
             } else {
                  console.error(`Target view not found: ${viewName}-view`); // Ошибка, если контейнер не найден
             }
